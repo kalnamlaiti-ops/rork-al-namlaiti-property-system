@@ -9,6 +9,7 @@ import { DataProvider } from "@/context/DataContext";
 
 import { Layout } from "./components/Layout";
 import Dashboard from "./pages/Dashboard";
+import AICommandCenter from "./pages/AICommandCenter";
 import Owners from "./pages/Owners";
 import Buildings from "./pages/Buildings";
 import Units from "./pages/Units";
@@ -56,6 +57,7 @@ const App = () => (
             <Routes>
               <Route path="/" element={<Layout />}>
                 <Route index element={<Dashboard />} />
+                <Route path="ai-command-center" element={<AICommandCenter />} />
                 <Route path="owners" element={<Owners />} />
                 <Route path="owners/:id" element={<OwnerDetail />} />
                 <Route path="buildings" element={<Buildings />} />

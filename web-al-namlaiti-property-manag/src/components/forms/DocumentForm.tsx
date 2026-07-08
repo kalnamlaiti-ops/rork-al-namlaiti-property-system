@@ -3,7 +3,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { useData } from "@/context/DataContext";
-import type { Document } from "@/types";
+import type { Building, Document, Invoice, Lease, Owner, Tenant, Unit } from "@/types";
 
 interface DocumentFormProps {
   initialData?: Document;
@@ -11,6 +11,15 @@ interface DocumentFormProps {
 }
 
 const entityTypes: Document["entityType"][] = ["Owner", "Building", "Unit", "Tenant", "Lease", "Invoice", "General"];
+type LinkableRecord = Owner | Building | Unit | Tenant | Lease | Invoice;
+
+function getRecordLabel(record: LinkableRecord): string {
+  if ("name" in record) return record.name;
+  if ("unitNumber" in record) return record.unitNumber;
+  if ("contractNumber" in record) return record.contractNumber;
+  if ("invoiceNumber" in record) return record.invoiceNumber;
+  return record.id;
+}
 
 export default function DocumentForm({ initialData, onClose }: DocumentFormProps) {
   const { addDocument, updateDocument, owners, buildings, units, tenants, leases, invoices } = useData();
@@ -26,7 +35,7 @@ export default function DocumentForm({ initialData, onClose }: DocumentFormProps
 
   const [errors, setErrors] = useState<Record<string, string>>({});
 
-  const entityOptions = () => {
+  const entityOptions = (): LinkableRecord[] => {
     switch (form.entityType) {
       case "Owner": return owners;
       case "Building": return buildings;
@@ -127,9 +136,9 @@ export default function DocumentForm({ initialData, onClose }: DocumentFormProps
                 className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm"
               >
                 <option value="">Select...</option>
-                {options.map((o: any) => (
-                  <option key={o.id} value={o.id}>
-                    {o.name || o.unitNumber || o.contractNumber || o.invoiceNumber || o.id}
+                {options.map((option) => (
+                  <option key={option.id} value={option.id}>
+                    {getRecordLabel(option)}
                   </option>
                 ))}
               </select>

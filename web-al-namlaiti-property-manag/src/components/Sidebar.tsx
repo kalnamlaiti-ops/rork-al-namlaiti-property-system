@@ -22,11 +22,13 @@ import {
   BarChart3,
   History,
   Shield,
+  Bot,
   LogOut,
 } from "lucide-react";
 
 const sidebarNav = [
   { name: "Dashboard", href: "/", icon: LayoutDashboard },
+  { name: "AI Command Center", href: "/ai-command-center", icon: Bot },
   {
     section: "PORTFOLIO",
     items: [
@@ -116,9 +118,12 @@ export function Sidebar({ mobileOpen, setMobileOpen }: { mobileOpen: boolean; se
           </div>
 
           <nav className="flex-1 space-y-6 overflow-y-auto px-3 py-4">
-            <SidebarItem item={sidebarNav[0] as { name: string; href: string; icon: React.ElementType }} onClick={() => setMobileOpen(false)} />
+            <div className="space-y-1">
+              <SidebarItem item={sidebarNav[0] as { name: string; href: string; icon: React.ElementType }} onClick={() => setMobileOpen(false)} />
+              <SidebarItem item={sidebarNav[1] as { name: string; href: string; icon: React.ElementType }} onClick={() => setMobileOpen(false)} />
+            </div>
 
-            {sidebarNav.slice(1).map((group) => (
+            {sidebarNav.slice(2).map((group) => (
               <div key={group.section}>
                 <p className="mb-2 px-3 text-xs font-semibold tracking-wider text-sidebar-foreground/60">
                   {group.section}
