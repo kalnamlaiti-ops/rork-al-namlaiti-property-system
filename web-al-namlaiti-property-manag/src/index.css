@@ -49,6 +49,36 @@
     --sidebar-border: 215 28% 17%;
     --sidebar-ring: 243 75% 59%;
   }
+
+  .dark {
+    --background: 222 47% 6%;
+    --foreground: 210 40% 98%;
+    --card: 222 47% 8%;
+    --card-foreground: 210 40% 98%;
+    --popover: 222 47% 8%;
+    --popover-foreground: 210 40% 98%;
+    --primary: 243 85% 68%;
+    --primary-foreground: 0 0% 100%;
+    --secondary: 217 33% 14%;
+    --secondary-foreground: 210 40% 98%;
+    --muted: 217 33% 14%;
+    --muted-foreground: 215 20% 70%;
+    --accent: 243 85% 68%;
+    --accent-foreground: 0 0% 100%;
+    --destructive: 0 72% 51%;
+    --destructive-foreground: 0 0% 100%;
+    --border: 217 33% 18%;
+    --input: 217 33% 18%;
+    --ring: 243 85% 68%;
+    --sidebar-background: 222 47% 5%;
+    --sidebar-foreground: 215 20% 72%;
+    --sidebar-primary: 243 85% 68%;
+    --sidebar-primary-foreground: 0 0% 100%;
+    --sidebar-accent: 217 33% 14%;
+    --sidebar-accent-foreground: 210 40% 98%;
+    --sidebar-border: 217 33% 14%;
+    --sidebar-ring: 243 85% 68%;
+  }
 }
 
 @layer base {
@@ -57,11 +87,19 @@
   }
   body {
     @apply bg-background text-foreground antialiased;
+    background-image: radial-gradient(circle at top left, hsl(var(--primary) / 0.12), transparent 34rem), radial-gradient(circle at bottom right, hsl(185 84% 45% / 0.10), transparent 30rem);
   }
 }
 
 @layer utilities {
   .text-balance {
     text-wrap: balance;
+  }
+}
+
+
+@layer components {
+  .glass-card {
+    @apply border-white/50 bg-white/75 shadow-xl shadow-slate-200/50 backdrop-blur-xl dark:border-white/10 dark:bg-slate-950/55 dark:shadow-black/20;
   }
 }

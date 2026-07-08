@@ -103,7 +103,7 @@ export function Sidebar({ mobileOpen, setMobileOpen }: { mobileOpen: boolean; se
     <>
       <aside
         className={cn(
-          "fixed inset-y-0 left-0 z-40 w-64 transform bg-sidebar-background transition-transform md:translate-x-0",
+          "fixed inset-y-0 left-0 z-40 w-64 transform border-r border-sidebar-border bg-sidebar-background/95 backdrop-blur-xl transition-transform md:translate-x-0",
           mobileOpen ? "translate-x-0" : "-translate-x-full",
         )}
       >
@@ -112,7 +112,7 @@ export function Sidebar({ mobileOpen, setMobileOpen }: { mobileOpen: boolean; se
             <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-primary text-white">
               <Building2 className="h-5 w-5" />
             </div>
-            <span className="text-lg font-semibold text-white">PropVault</span>
+            <div><span className="text-lg font-semibold text-white">PropVault AI</span><p className="text-[11px] font-medium text-sidebar-foreground">Property OS</p></div>
           </div>
 
           <nav className="flex-1 space-y-6 overflow-y-auto px-3 py-4">
