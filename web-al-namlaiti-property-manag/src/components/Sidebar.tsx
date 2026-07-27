@@ -48,6 +48,7 @@ const sidebarNav = [
       { name: "Invoices", href: "/invoices", icon: Receipt },
       { name: "Payments", href: "/payments", icon: CreditCard },
       { name: "Expenses", href: "/expenses", icon: Wallet },
+      { name: "EWA Accounts", href: "/ewa-accounts", icon: Zap },
       { name: "EWA Bills", href: "/ewa-bills", icon: Zap },
       { name: "Chart of Accounts", href: "/chart-of-accounts", icon: BookOpen },
       { name: "Journal Entries", href: "/journal-entries", icon: NotebookPen },

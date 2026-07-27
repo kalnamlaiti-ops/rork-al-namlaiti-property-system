@@ -12,6 +12,75 @@ export type PaymentMethod = "Bank Transfer" | "Cash" | "Cheque" | "Card" | "Onli
 export type ExpenseStatus = "Pending" | "Approved" | "Paid" | "Rejected" | "Invoiced";
 export type EWABillStatus = "Pending" | "Invoiced" | "Paid";
 
+// ── EWA shared-meter distribution ──
+export type EWAAccountStatus = "Active" | "Inactive";
+export type AllocationMethod = "equal" | "percentage" | "fixed" | "meter";
+export type VacantAction = "exclude" | "landlord";
+export type EWADistributionStatus = "Draft" | "Distributed" | "Recalculated";
+
+/** Per-unit allocation rule stored on an EWA account. */
+export interface UnitAllocationRule {
+  unitId: string;
+  /** Percentage of the total bill (used when method = "percentage"). */
+  percentage?: number;
+  /** Fixed monthly amount (used when method = "fixed"). */
+  fixedAmount?: number;
+  /** Sub-meter readings (used when method = "meter"). */
+  previousReading?: number;
+  currentReading?: number;
+}
+
+/** A shared EWA (electricity/water) account that supplies multiple units. */
+export interface EWAAccount {
+  id: string;
+  /** The main EWA account number, e.g. 1078980404. */
+  accountNumber: string;
+  nickname?: string;
+  buildingId: string;
+  status: EWAAccountStatus;
+  allocationMethod: AllocationMethod;
+  /** Unit IDs supplied by this account. */
+  linkedUnitIds: string[];
+  /** Per-unit allocation rules (percentages / fixed amounts / meter reads). */
+  rules: UnitAllocationRule[];
+  /** What to do with a vacant linked unit. */
+  vacantAction: VacantAction;
+  createdAt: string;
+  notes?: string;
+}
+
+/** A single unit's computed share of an EWA bill. */
+export interface EWABillAllocation {
+  unitId: string;
+  leaseId?: string;
+  tenantId?: string;
+  amount: number;
+  vacant: boolean;
+  /** True when this unit was skipped (vacant + exclude). */
+  excluded: boolean;
+  /** True when the landlord absorbs this unit's share (no tenant invoice). */
+  chargeToLandlord: boolean;
+  /** ID of the per-unit EWABill created when the distribution was processed. */
+  ewaBillId?: string;
+}
+
+/** A monthly EWA bill entered for a shared account, split across units. */
+export interface EWADistribution {
+  id: string;
+  accountId: string;
+  billNumber: string;
+  /** Billing month, e.g. "2026-07". */
+  month: string;
+  totalAmount: number;
+  allocatedAmount: number;
+  remainingBalance: number;
+  dueDate: string;
+  status: EWADistributionStatus;
+  allocations: EWABillAllocation[];
+  enteredAt: string;
+  notes?: string;
+}
+
 export interface Owner {
   id: string;
   name: string;

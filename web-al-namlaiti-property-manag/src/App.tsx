@@ -18,6 +18,7 @@ import Invoices from "./pages/Invoices";
 import Payments from "./pages/Payments";
 import Expenses from "./pages/Expenses";
 import EWABills from "./pages/EWABills";
+import EWAAccounts from "./pages/EWAAccounts";
 import ChartOfAccounts from "./pages/ChartOfAccounts";
 import JournalEntries from "./pages/JournalEntries";
 import Distributions from "./pages/Distributions";
@@ -30,6 +31,7 @@ import InvoiceDetail from "./pages/details/InvoiceDetail";
 import PaymentDetail from "./pages/details/PaymentDetail";
 import ExpenseDetail from "./pages/details/ExpenseDetail";
 import EWABillDetail from "./pages/details/EWABillDetail";
+import EWAAccountDetail from "./pages/details/EWAAccountDetail";
 import AccountDetail from "./pages/details/AccountDetail";
 import JournalEntryDetail from "./pages/details/JournalEntryDetail";
 import DistributionDetail from "./pages/details/DistributionDetail";
@@ -74,6 +76,8 @@ const App = () => (
                 <Route path="expenses/:id" element={<ExpenseDetail />} />
                 <Route path="ewa-bills" element={<EWABills />} />
                 <Route path="ewa-bills/:id" element={<EWABillDetail />} />
+                <Route path="ewa-accounts" element={<EWAAccounts />} />
+                <Route path="ewa-accounts/:id" element={<EWAAccountDetail />} />
                 <Route path="chart-of-accounts" element={<ChartOfAccounts />} />
                 <Route path="chart-of-accounts/:id" element={<AccountDetail />} />
                 <Route path="journal-entries" element={<JournalEntries />} />

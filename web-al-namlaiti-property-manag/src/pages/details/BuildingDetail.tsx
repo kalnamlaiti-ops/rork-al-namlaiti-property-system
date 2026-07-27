@@ -6,12 +6,12 @@ import { StatusBadge } from "@/components/StatusBadge";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
 import { useData } from "@/context/DataContext";
 import BuildingForm from "@/components/forms/BuildingForm";
-import { ArrowLeft, Pencil, MapPin, Layers, Home, Users, Plus, AlertTriangle, Shield } from "lucide-react";
+import { ArrowLeft, Pencil, MapPin, Layers, Home, Users, Plus, AlertTriangle, Shield, Zap, Link2 } from "lucide-react";
 
 export default function BuildingDetail() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
-  const { buildings, units, owners, leases, getBuildingById, getOwnerById } = useData();
+  const { buildings, units, owners, leases, getBuildingById, getOwnerById, getBuildingEWAAccounts, ewaDistributions } = useData();
   const [dialogOpen, setDialogOpen] = useState(false);
 
   const building = id ? getBuildingById(id) : undefined;
@@ -33,6 +33,10 @@ export default function BuildingDetail() {
   const occupancyRate = buildingUnits.length > 0 ? Math.round((occupied / buildingUnits.length) * 100) : 0;
   const owner = getOwnerById(building.ownerId);
   const openComplaints = 0; // placeholder
+  const buildingEWAAccounts = getBuildingEWAAccounts(building.id);
+  const buildingEWABilled = ewaDistributions
+    .filter((d) => buildingEWAAccounts.some((a) => a.id === d.accountId))
+    .reduce((s, d) => s + d.totalAmount, 0);
 
   return (
     <div className="space-y-6">
@@ -121,6 +125,46 @@ export default function BuildingDetail() {
                 <p className="text-sm text-muted-foreground">Expiry Date</p>
                 <p className="font-medium">{building.insuranceExpiryDate || "—"}</p>
               </div>
+            </div>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardContent className="p-6">
+            <h3 className="mb-4 text-base font-semibold flex items-center gap-2"><Zap className="h-4 w-4" /> EWA Accounts</h3>
+            {buildingEWAAccounts.length === 0 ? (
+              <p className="text-sm text-muted-foreground">No shared EWA meters for this building.</p>
+            ) : (
+              <div className="space-y-3">
+                {buildingEWAAccounts.map((a) => {
+                  const billed = ewaDistributions
+                    .filter((d) => d.accountId === a.id)
+                    .reduce((s, d) => s + d.totalAmount, 0);
+                  return (
+                    <div key={a.id} className="flex items-center justify-between rounded-lg border p-3">
+                      <div className="flex items-center gap-3">
+                        <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-indigo-100 text-indigo-600">
+                          <Link2 className="h-4 w-4" />
+                        </div>
+                        <div>
+                          <Link to={`/ewa-accounts/${a.id}`} className="font-medium text-primary hover:underline">
+                            {a.accountNumber}
+                          </Link>
+                          <p className="text-xs text-muted-foreground">
+                            {a.linkedUnitIds.length} unit(s) · {a.allocationMethod} · {billed.toFixed(0)} BHD billed
+                          </p>
+                        </div>
+                      </div>
+                      <StatusBadge status={a.status} />
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+            <div className="mt-4">
+              <Button variant="secondary" size="sm" className="w-full" onClick={() => navigate("/ewa-accounts")}>
+                <Plus className="mr-2 h-4 w-4" /> Manage EWA Accounts
+              </Button>
             </div>
           </CardContent>
         </Card>

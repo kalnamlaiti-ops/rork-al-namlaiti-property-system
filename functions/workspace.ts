@@ -21,6 +21,8 @@ export interface DataStore {
   journalEntries: unknown[];
   distributions: unknown[];
   ewaBills: unknown[];
+  ewaAccounts: unknown[];
+  ewaDistributions: unknown[];
   complaints: unknown[];
   maintenanceRequests: unknown[];
   vendors: unknown[];
@@ -42,6 +44,8 @@ const COLLECTION_KEYS: (keyof DataStore)[] = [
   "journalEntries",
   "distributions",
   "ewaBills",
+  "ewaAccounts",
+  "ewaDistributions",
   "complaints",
   "maintenanceRequests",
   "vendors",
@@ -63,6 +67,8 @@ const EMPTY_STORE: DataStore = {
   journalEntries: [],
   distributions: [],
   ewaBills: [],
+  ewaAccounts: [],
+  ewaDistributions: [],
   complaints: [],
   maintenanceRequests: [],
   vendors: [],
@@ -271,6 +277,8 @@ export class Workspace extends DurableObject<Env> {
       Payment: "payments",
       Expense: "expenses",
       "EWA Bill": "ewaBills",
+      "EWA Account": "ewaAccounts",
+      "EWA Distribution": "ewaDistributions",
       "Chart of Account": "chartOfAccounts",
       "Journal Entry": "journalEntries",
       Distribution: "distributions",

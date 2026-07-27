@@ -10,6 +10,8 @@ import type {
   Distribution,
   Document,
   EWABill,
+  EWAAccount,
+  EWADistribution,
   Expense,
   HistoryAction,
   HistoryEntry,
@@ -42,6 +44,7 @@ import { buildInvoiceJournalEntry } from "@/lib/accountingHelper";
 import { sendInvoiceEmail, sendPaymentReceiptEmail } from "@/lib/emailClient";
 import type { PdfContext } from "@/lib/pdfGenerator";
 import { leaseCascade, invoiceCascade, paymentCascade } from "@/lib/automation";
+import { computeAllocation, validateLinkedUnits, validatePercentageRules } from "@/lib/ewaAllocation";
 
 export interface DataStore {
   owners: Owner[];
@@ -56,6 +59,8 @@ export interface DataStore {
   journalEntries: JournalEntry[];
   distributions: Distribution[];
   ewaBills: EWABill[];
+  ewaAccounts: EWAAccount[];
+  ewaDistributions: EWADistribution[];
   complaints: Complaint[];
   maintenanceRequests: MaintenanceRequest[];
   vendors: Vendor[];
@@ -77,6 +82,8 @@ const EMPTY_STORE: DataStore = {
   journalEntries: [],
   distributions: [],
   ewaBills: [],
+  ewaAccounts: [],
+  ewaDistributions: [],
   complaints: [],
   maintenanceRequests: [],
   vendors: [],
@@ -132,6 +139,8 @@ const ENTITY_TYPE_TO_COLLECTION: Record<string, keyof DataStore> = {
   Payment: "payments",
   Expense: "expenses",
   "EWA Bill": "ewaBills",
+  "EWA Account": "ewaAccounts",
+  "EWA Distribution": "ewaDistributions",
   "Chart of Account": "chartOfAccounts",
   "Journal Entry": "journalEntries",
   Distribution: "distributions",
@@ -969,6 +978,339 @@ export const [DataProvider, useData] = createContextHook(() => {
       toast.success("EWA bill deleted");
     },
     [sendDelete, pushHistory],
+  );
+
+  // ────────────────────────────── EWA Accounts (shared meters) ──────────────────────────────
+  const addEWAAccount = useCallback(
+    (account: Omit<EWAAccount, "id" | "createdAt">) => {
+      const newAccount: EWAAccount = {
+        ...account,
+        id: generateId("ewacc"),
+        createdAt: nowISO(),
+      };
+      // Validate before persisting.
+      const linkErrors = validateLinkedUnits(newAccount, data.ewaAccounts, data.units);
+      const ruleErrors = validatePercentageRules(newAccount);
+      const errors = [...linkErrors, ...ruleErrors];
+      if (errors.length > 0) {
+        toast.error(errors[0]);
+        return newAccount;
+      }
+      sendAdd("ewaAccounts", newAccount);
+      pushHistory({
+        action: "Created",
+        entityType: "EWA Account",
+        entityId: newAccount.id,
+        entityName: newAccount.accountNumber,
+        summary: `EWA account "${newAccount.accountNumber}" created — ${newAccount.linkedUnitIds.length} unit(s) linked, method: ${newAccount.allocationMethod}`,
+      });
+      toast.success(`EWA account "${newAccount.accountNumber}" created`);
+      return newAccount;
+    },
+    [sendAdd, pushHistory, data.ewaAccounts, data.units],
+  );
+
+  const updateEWAAccount = useCallback(
+    (id: string, updates: Partial<EWAAccount>) => {
+      let changes: { field: string; from: string; to: string }[] = [];
+      let name = "EWA Account";
+      let merged: EWAAccount | undefined;
+      setData((prev) => {
+        const existing = prev.ewaAccounts.find((a) => a.id === id);
+        if (!existing) return prev;
+        name = existing.accountNumber;
+        merged = { ...existing, ...updates };
+        changes = diffChanges(existing as unknown as Record<string, unknown>, merged as unknown as Record<string, unknown>);
+        return prev;
+      });
+      // Validate merged result.
+      if (merged) {
+        const linkErrors = validateLinkedUnits(merged, data.ewaAccounts, data.units);
+        const ruleErrors = validatePercentageRules(merged);
+        const errors = [...linkErrors, ...ruleErrors];
+        if (errors.length > 0) {
+          toast.error(errors[0]);
+          return;
+        }
+      }
+      sendUpdate("ewaAccounts", id, updates as unknown as Record<string, unknown>);
+      pushHistory({
+        action: "Edited",
+        entityType: "EWA Account",
+        entityId: id,
+        entityName: name,
+        summary: `EWA account "${name}" edited (${changes.length} field${changes.length === 1 ? "" : "s"} changed)`,
+        changes,
+      });
+      toast.success("EWA account updated");
+    },
+    [sendUpdate, pushHistory, data.ewaAccounts, data.units],
+  );
+
+  const deleteEWAAccount = useCallback(
+    (id: string) => {
+      let name = "EWA Account";
+      let snapshot: EWAAccount | undefined;
+      setData((prev) => {
+        const existing = prev.ewaAccounts.find((a) => a.id === id);
+        if (existing) { name = existing.accountNumber; snapshot = existing; }
+        return prev;
+      });
+      sendDelete("ewaAccounts", id, snapshot as unknown as Record<string, unknown>);
+      pushHistory({
+        action: "Deleted",
+        entityType: "EWA Account",
+        entityId: id,
+        entityName: name,
+        summary: `EWA account "${name}" deleted`,
+        snapshot,
+      });
+      toast.success("EWA account deleted");
+    },
+    [sendDelete, pushHistory],
+  );
+
+  // ────────────────────────────── EWA Distributions ──────────────────────────────
+
+  /**
+   * Enter a monthly EWA bill for a shared account and compute each linked
+   * unit's share. Stores a draft EWA Distribution (no per-unit bills yet).
+   * Returns the created distribution, or undefined on error.
+   */
+  const createEWADistribution = useCallback(
+    (input: {
+      accountId: string;
+      month: string;
+      totalAmount: number;
+      dueDate: string;
+      notes?: string;
+    }): EWADistribution | undefined => {
+      const account = data.ewaAccounts.find((a) => a.id === input.accountId);
+      if (!account) {
+        toast.error("EWA account not found");
+        return undefined;
+      }
+      if (input.totalAmount <= 0) {
+        toast.error("Total amount must be greater than zero");
+        return undefined;
+      }
+      // Prevent duplicate distribution for the same account + month.
+      const existing = data.ewaDistributions.find(
+        (d) => d.accountId === input.accountId && d.month === input.month,
+      );
+      if (existing) {
+        toast.error(`A distribution already exists for ${input.month}`);
+        return undefined;
+      }
+
+      const result = computeAllocation({
+        account,
+        totalAmount: input.totalAmount,
+        units: data.units,
+        leases: data.leases,
+        tenants: data.tenants,
+      });
+
+      const billNumber = generateCode(`EWA-${account.accountNumber}`, data.ewaDistributions.length);
+      const dist: EWADistribution = {
+        id: generateId("ewadist"),
+        accountId: input.accountId,
+        billNumber,
+        month: input.month,
+        totalAmount: input.totalAmount,
+        allocatedAmount: result.allocatedAmount,
+        remainingBalance: result.remainingBalance,
+        dueDate: input.dueDate,
+        status: "Draft",
+        allocations: result.allocations,
+        enteredAt: nowISO(),
+        notes: input.notes,
+      };
+      sendAdd("ewaDistributions", dist);
+      pushHistory({
+        action: "Created",
+        entityType: "EWA Distribution",
+        entityId: dist.id,
+        entityName: dist.billNumber,
+        summary: `EWA distribution "${dist.billNumber}" entered for ${input.month} — ${result.allocatedAmount.toFixed(2)} BHD allocated across ${result.allocations.filter((a) => !a.excluded).length} unit(s)`,
+      });
+      if (result.warnings.length > 0) {
+        toast.info(result.warnings[0]);
+      }
+      toast.success(`EWA distribution created — ${result.allocatedAmount.toFixed(2)} BHD to ${result.allocations.filter((a) => !a.excluded && !a.chargeToLandlord).length} tenant(s)`);
+      return dist;
+    },
+    [data.ewaAccounts, data.ewaDistributions, data.units, data.leases, data.tenants, sendAdd, pushHistory],
+  );
+
+  const updateEWADistribution = useCallback(
+    (id: string, updates: Partial<EWADistribution>) => {
+      let changes: { field: string; from: string; to: string }[] = [];
+      let name = "EWA Distribution";
+      setData((prev) => {
+        const existing = prev.ewaDistributions.find((d) => d.id === id);
+        if (!existing) return prev;
+        name = existing.billNumber;
+        changes = diffChanges(existing as unknown as Record<string, unknown>, updates as unknown as Record<string, unknown>);
+        return prev;
+      });
+      sendUpdate("ewaDistributions", id, updates as unknown as Record<string, unknown>);
+      pushHistory({
+        action: "Edited",
+        entityType: "EWA Distribution",
+        entityId: id,
+        entityName: name,
+        summary: `EWA distribution "${name}" edited (${changes.length} field${changes.length === 1 ? "" : "s"} changed)`,
+        changes,
+      });
+      toast.success("EWA distribution updated");
+    },
+    [sendUpdate, pushHistory],
+  );
+
+  const deleteEWADistribution = useCallback(
+    (id: string) => {
+      let name = "EWA Distribution";
+      let snapshot: EWADistribution | undefined;
+      setData((prev) => {
+        const existing = prev.ewaDistributions.find((d) => d.id === id);
+        if (existing) { name = existing.billNumber; snapshot = existing; }
+        return prev;
+      });
+      sendDelete("ewaDistributions", id, snapshot as unknown as Record<string, unknown>);
+      pushHistory({
+        action: "Deleted",
+        entityType: "EWA Distribution",
+        entityId: id,
+        entityName: name,
+        summary: `EWA distribution "${name}" deleted`,
+        snapshot,
+      });
+      toast.success("EWA distribution deleted");
+    },
+    [sendDelete, pushHistory],
+  );
+
+  /**
+   * Recalculate an existing distribution's allocations (e.g. after the
+   * account's allocation method or rules changed). Only allowed while the
+   * distribution is still Draft (not yet processed into per-unit bills).
+   */
+  const recalculateEWADistribution = useCallback(
+    (id: string): EWADistribution | undefined => {
+      const dist = data.ewaDistributions.find((d) => d.id === id);
+      if (!dist) return undefined;
+      if (dist.status === "Distributed") {
+        toast.error("Cannot recalculate a distribution that has already been processed. Delete and recreate it instead.");
+        return undefined;
+      }
+      const account = data.ewaAccounts.find((a) => a.id === dist.accountId);
+      if (!account) {
+        toast.error("Linked EWA account no longer exists");
+        return undefined;
+      }
+      const result = computeAllocation({
+        account,
+        totalAmount: dist.totalAmount,
+        units: data.units,
+        leases: data.leases,
+        tenants: data.tenants,
+      });
+      const updated: Partial<EWADistribution> = {
+        allocations: result.allocations,
+        allocatedAmount: result.allocatedAmount,
+        remainingBalance: result.remainingBalance,
+        status: "Recalculated",
+      };
+      sendUpdate("ewaDistributions", id, updated as unknown as Record<string, unknown>);
+      pushHistory({
+        action: "Edited" as HistoryAction,
+        entityType: "EWA Distribution",
+        entityId: id,
+        entityName: dist.billNumber,
+        summary: `EWA distribution "${dist.billNumber}" recalculated — ${result.allocatedAmount.toFixed(2)} BHD allocated`,
+      });
+      if (result.warnings.length > 0) toast.info(result.warnings[0]);
+      toast.success("Distribution recalculated");
+      return { ...dist, ...updated } as EWADistribution;
+    },
+    [data.ewaDistributions, data.ewaAccounts, data.units, data.leases, data.tenants, sendUpdate, pushHistory],
+  );
+
+  /**
+   * Process a draft distribution: for each chargeable (non-excluded, non-
+   * landlord) unit, create a per-unit EWABill record so the existing
+   * invoice automation picks it up on the next billing run. Marks the
+   * distribution as Distributed and records the created EWA bill IDs back
+   * onto each allocation.
+   */
+  const processEWADistribution = useCallback(
+    (id: string): { created: number; skipped: number } => {
+      const dist = data.ewaDistributions.find((d) => d.id === id);
+      if (!dist) {
+        toast.error("Distribution not found");
+        return { created: 0, skipped: 0 };
+      }
+      if (dist.status === "Distributed") {
+        toast.error("Distribution already processed");
+        return { created: 0, skipped: dist.allocations.length };
+      }
+      const account = data.ewaAccounts.find((a) => a.id === dist.accountId);
+      if (!account) {
+        toast.error("Linked EWA account no longer exists");
+        return { created: 0, skipped: dist.allocations.length };
+      }
+
+      let created = 0;
+      let skipped = 0;
+      const updatedAllocations = dist.allocations.map((alloc) => {
+        // Skip excluded (vacant + exclude) and landlord-charged units.
+        if (alloc.excluded || alloc.chargeToLandlord) {
+          skipped++;
+          return alloc;
+        }
+        // Need a lease to attach the EWA bill to (the invoice engine keys off leaseId).
+        if (!alloc.leaseId) {
+          skipped++;
+          return alloc;
+        }
+        const unit = data.units.find((u) => u.id === alloc.unitId);
+        const ewaBill: EWABill = {
+          id: generateId("ewa"),
+          billNumber: generateCode("EWA", data.ewaBills.length + created),
+          leaseId: alloc.leaseId,
+          unitId: alloc.unitId,
+          buildingId: account.buildingId,
+          month: dist.month,
+          billAmount: alloc.amount,
+          limit: 0, // shared-meter: no per-lease limit; full share is chargeable
+          excess: alloc.amount,
+          dueDate: dist.dueDate,
+          status: "Pending",
+          // Link back to the distribution for traceability.
+          invoiceId: undefined,
+        };
+        sendAdd("ewaBills", ewaBill);
+        created++;
+        return { ...alloc, ewaBillId: ewaBill.id };
+      });
+
+      sendUpdate("ewaDistributions", id, {
+        allocations: updatedAllocations,
+        status: "Distributed",
+      } as unknown as Record<string, unknown>);
+
+      pushHistory({
+        action: "Edited" as HistoryAction,
+        entityType: "EWA Distribution",
+        entityId: id,
+        entityName: dist.billNumber,
+        summary: `EWA distribution "${dist.billNumber}" processed — ${created} per-unit EWA bill(s) created for invoice automation`,
+      });
+      toast.success(`${created} EWA bill(s) created — they'll be included in the next invoice run`);
+      return { created, skipped };
+    },
+    [data.ewaDistributions, data.ewaAccounts, data.units, data.ewaBills.length, sendAdd, sendUpdate, pushHistory],
   );
 
   // ────────────────────────────── Chart of Accounts ──────────────────────────────
@@ -1914,6 +2256,19 @@ export const [DataProvider, useData] = createContextHook(() => {
     [data.payments],
   );
   const getDocumentById = useCallback((id: string) => data.documents.find((d) => d.id === id), [data.documents]);
+  const getEWAAccountById = useCallback((id: string) => data.ewaAccounts.find((a) => a.id === id), [data.ewaAccounts]);
+  const getBuildingEWAAccounts = useCallback(
+    (buildingId: string) => data.ewaAccounts.filter((a) => a.buildingId === buildingId),
+    [data.ewaAccounts],
+  );
+  const getEWADistributionsForAccount = useCallback(
+    (accountId: string) => data.ewaDistributions.filter((d) => d.accountId === accountId),
+    [data.ewaDistributions],
+  );
+  const getUnitEWAAccount = useCallback(
+    (unitId: string) => data.ewaAccounts.find((a) => a.status === "Active" && a.linkedUnitIds.includes(unitId)),
+    [data.ewaAccounts],
+  );
 
   return {
     ...data,
@@ -1968,6 +2323,18 @@ export const [DataProvider, useData] = createContextHook(() => {
     addEWABill,
     updateEWABill,
     deleteEWABill,
+    addEWAAccount,
+    updateEWAAccount,
+    deleteEWAAccount,
+    createEWADistribution,
+    updateEWADistribution,
+    deleteEWADistribution,
+    recalculateEWADistribution,
+    processEWADistribution,
+    getEWAAccountById,
+    getBuildingEWAAccounts,
+    getEWADistributionsForAccount,
+    getUnitEWAAccount,
     addChartOfAccount,
     updateChartOfAccount,
     deleteChartOfAccount,
