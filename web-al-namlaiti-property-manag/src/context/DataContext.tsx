@@ -24,6 +24,8 @@ import type {
   Tenant,
   Unit,
   Vendor,
+  WhatsAppLog,
+  WhatsAppSettings,
 } from "@/types";
 import {
   syncClient,
@@ -42,6 +44,12 @@ import {
 } from "@/lib/invoiceGenerator";
 import { buildInvoiceJournalEntry } from "@/lib/accountingHelper";
 import { sendInvoiceEmail, sendPaymentReceiptEmail } from "@/lib/emailClient";
+import {
+  sendInvoiceWhatsApp,
+  testWhatsAppConnection,
+  whatsappAlreadySent,
+  normalizePhoneNumber,
+} from "@/lib/whatsappClient";
 import type { PdfContext } from "@/lib/pdfGenerator";
 import { leaseCascade, invoiceCascade, paymentCascade } from "@/lib/automation";
 import { computeAllocation, validateLinkedUnits, validatePercentageRules } from "@/lib/ewaAllocation";
@@ -66,6 +74,8 @@ export interface DataStore {
   vendors: Vendor[];
   assets: Asset[];
   documents: Document[];
+  whatsappLogs: WhatsAppLog[];
+  whatsappSettings: WhatsAppSettings[];
   history: HistoryEntry[];
 }
 
@@ -89,6 +99,8 @@ const EMPTY_STORE: DataStore = {
   vendors: [],
   assets: [],
   documents: [],
+  whatsappLogs: [],
+  whatsappSettings: [],
   history: [],
 };
 
@@ -149,6 +161,8 @@ const ENTITY_TYPE_TO_COLLECTION: Record<string, keyof DataStore> = {
   Complaint: "complaints",
   "Maintenance Request": "maintenanceRequests",
   Document: "documents",
+  "WhatsApp Log": "whatsappLogs",
+  "WhatsApp Settings": "whatsappSettings",
 };
 
 export const [DataProvider, useData] = createContextHook(() => {
@@ -2229,6 +2243,284 @@ export const [DataProvider, useData] = createContextHook(() => {
     }
   }, [data.invoices, updateOverdueInvoices]);
 
+  // ──────────────────────────── WhatsApp Automation ────────────────────────────
+
+  /** Default WhatsApp settings id (singleton — one settings record per workspace). */
+  const WHATSAPP_SETTINGS_ID = "whatsapp-settings-default";
+
+  /** Get the current WhatsApp settings (creates defaults if none exist). */
+  const getWhatsAppSettings = useCallback((): WhatsAppSettings => {
+    const existing = data.whatsappSettings.find((s) => s.id === WHATSAPP_SETTINGS_ID);
+    if (existing) return existing;
+    return {
+      id: WHATSAPP_SETTINGS_ID,
+      autoSendEnabled: false,
+      sendDayOfMonth: 1,
+      channel: "both",
+      connected: false,
+      defaultCountryCode: "973",
+    };
+  }, [data.whatsappSettings]);
+
+  /** Update WhatsApp settings (creates if they don't exist). */
+  const updateWhatsAppSettings = useCallback(
+    (updates: Partial<Omit<WhatsAppSettings, "id">>) => {
+      const existing = data.whatsappSettings.find((s) => s.id === WHATSAPP_SETTINGS_ID);
+      if (existing) {
+        sendUpdate("whatsappSettings", WHATSAPP_SETTINGS_ID, updates as unknown as Record<string, unknown>);
+      } else {
+        const newSettings: WhatsAppSettings = {
+          id: WHATSAPP_SETTINGS_ID,
+          autoSendEnabled: false,
+          sendDayOfMonth: 1,
+          channel: "both",
+          connected: false,
+          defaultCountryCode: "973",
+          ...updates,
+        };
+        sendAdd("whatsappSettings", newSettings);
+      }
+      pushHistory({
+        action: "Edited" as HistoryAction,
+        entityType: "WhatsApp Settings",
+        entityId: WHATSAPP_SETTINGS_ID,
+        entityName: "WhatsApp Settings",
+        summary: `WhatsApp settings updated`,
+      });
+      toast.success("WhatsApp settings updated");
+    },
+    [data.whatsappSettings, sendUpdate, sendAdd, pushHistory],
+  );
+
+  /** Test the WhatsApp API connection and update settings with the result. */
+  const testWhatsApp = useCallback(async (): Promise<boolean> => {
+    sendUpdate("whatsappSettings", WHATSAPP_SETTINGS_ID, {
+      lastTestedAt: nowISO(),
+    } as unknown as Record<string, unknown>);
+    const result = await testWhatsAppConnection();
+    const settings = data.whatsappSettings.find((s) => s.id === WHATSAPP_SETTINGS_ID);
+    if (settings) {
+      sendUpdate("whatsappSettings", WHATSAPP_SETTINGS_ID, {
+        lastTestOk: result.success,
+        lastTestError: result.success ? undefined : result.message,
+        lastTestedAt: nowISO(),
+        connected: result.success,
+      } as unknown as Record<string, unknown>);
+    } else {
+      sendAdd("whatsappSettings", {
+        id: WHATSAPP_SETTINGS_ID,
+        autoSendEnabled: false,
+        sendDayOfMonth: 1,
+        channel: "both",
+        defaultCountryCode: "973",
+        lastTestedAt: nowISO(),
+        lastTestOk: result.success,
+        lastTestError: result.success ? undefined : result.message,
+        connected: result.success,
+      } as unknown as WhatsAppSettings);
+    }
+    if (result.success) {
+      toast.success(result.message);
+    } else {
+      toast.error(result.message);
+    }
+    pushHistory({
+      action: "Edited" as HistoryAction,
+      entityType: "WhatsApp Settings",
+      entityId: WHATSAPP_SETTINGS_ID,
+      entityName: "WhatsApp Settings",
+      summary: result.success
+        ? "WhatsApp connection test succeeded"
+        : `WhatsApp connection test failed: ${result.message}`,
+    });
+    return result.success;
+  }, [data.whatsappSettings, sendUpdate, sendAdd, pushHistory]);
+
+  /** Send a single invoice via WhatsApp. Creates a log entry and handles status. */
+  const sendInvoiceWhatsAppMessage = useCallback(
+    async (invoiceId: string, options?: { isResend?: boolean }): Promise<boolean> => {
+      const invoice = data.invoices.find((i) => i.id === invoiceId);
+      if (!invoice) return false;
+
+      const tenant = data.tenants.find((t) => t.id === invoice.tenantId);
+      if (!tenant) {
+        toast.error("Tenant not found for this invoice");
+        return false;
+      }
+      if (!tenant.phone) {
+        toast.error(`Tenant ${tenant.name} has no phone number`);
+        return false;
+      }
+
+      const settings = getWhatsAppSettings();
+      const billingMonth = invoice.periodFrom
+        ? `${invoice.periodFrom.slice(0, 4)}-${invoice.periodFrom.slice(5, 7)}`
+        : toPeriodKey(invoice.issueDate ?? invoice.dueDate);
+
+      // ── Duplicate prevention ──
+      if (!options?.isResend) {
+        if (whatsappAlreadySent(data.whatsappLogs, tenant.id, billingMonth)) {
+          toast.info(`WhatsApp already sent to ${tenant.name} for ${billingMonth}`);
+          return false;
+        }
+      }
+
+      const ctx = buildPdfContext(invoice);
+      const phoneNumber = normalizePhoneNumber(tenant.phone, settings.defaultCountryCode);
+
+      // Create a log entry (queued status)
+      const logId = generateId("walog");
+      const log: WhatsAppLog = {
+        id: logId,
+        tenantId: tenant.id,
+        invoiceId: invoice.id,
+        billingMonth,
+        phoneNumber,
+        sentAt: nowISO(),
+        status: "queued",
+        retryCount: 0,
+        isResend: options?.isResend ?? false,
+        hasAttachment: true,
+      };
+      sendAdd("whatsappLogs", log);
+
+      // Attempt to send
+      const result = await sendInvoiceWhatsApp(ctx, { isResend: options?.isResend });
+
+      if (result.success) {
+        sendUpdate("whatsappLogs", logId, {
+          status: "sent",
+          whatsappMessageId: result.messageId,
+          sentAt: nowISO(),
+          failed: false,
+          errorMessage: undefined,
+        } as unknown as Record<string, unknown>);
+        pushHistory({
+          action: "Edited" as HistoryAction,
+          entityType: "Invoice",
+          entityId: invoice.id,
+          entityName: invoice.invoiceNumber,
+          summary: `Invoice ${invoice.invoiceNumber} sent via WhatsApp to ${tenant.name}`,
+        });
+        toast.success(`WhatsApp sent to ${tenant.name}`);
+        return true;
+      } else {
+        sendUpdate("whatsappLogs", logId, {
+          status: "failed",
+          failed: true,
+          errorMessage: result.message,
+          retryCount: 3, // the client already retried 3 times
+          sentAt: nowISO(),
+        } as unknown as Record<string, unknown>);
+        pushHistory({
+          action: "Edited" as HistoryAction,
+          entityType: "WhatsApp Log",
+          entityId: logId,
+          entityName: invoice.invoiceNumber,
+          summary: `WhatsApp send failed for ${invoice.invoiceNumber}: ${result.message}`,
+        });
+        toast.error(`WhatsApp failed: ${result.message}`);
+        return false;
+      }
+    },
+    [data.invoices, data.tenants, data.whatsappLogs, getWhatsAppSettings, buildPdfContext, sendAdd, sendUpdate, pushHistory],
+  );
+
+  /** Resend a failed WhatsApp message (manual retry from the dashboard). */
+  const resendWhatsAppMessage = useCallback(
+    async (logId: string): Promise<boolean> => {
+      const log = data.whatsappLogs.find((l) => l.id === logId);
+      if (!log) return false;
+      if (log.retryCount >= 3) {
+        toast.error("Max retries reached. The client will attempt 3 more sends.");
+      }
+      // Reset retry count and attempt a fresh send
+      sendUpdate("whatsappLogs", logId, {
+        status: "queued",
+        failed: false,
+        errorMessage: undefined,
+        retryCount: log.retryCount,
+        sentAt: nowISO(),
+      } as unknown as Record<string, unknown>);
+      // Actually resend (the send function does its own 3 retries)
+      return sendInvoiceWhatsAppMessage(log.invoiceId, { isResend: true });
+    },
+    [data.whatsappLogs, sendUpdate, sendInvoiceWhatsAppMessage],
+  );
+
+  /** Batch-send all Draft/Sent invoices via WhatsApp (for the current month). */
+  const sendAllInvoicesWhatsApp = useCallback(
+    async (filter?: (inv: Invoice) => boolean): Promise<{ sent: number; failed: number }> => {
+      const settings = getWhatsAppSettings();
+      const toSend = data.invoices.filter(
+        (i) =>
+          (i.status === "Draft" || i.status === "Sent" || i.status === "Overdue") &&
+          (!filter || filter(i)),
+      );
+
+      let sent = 0;
+      let failed = 0;
+
+      for (const invoice of toSend) {
+        const tenant = data.tenants.find((t) => t.id === invoice.tenantId);
+        if (!tenant?.phone) {
+          failed++;
+          continue;
+        }
+        const billingMonth = invoice.periodFrom
+          ? `${invoice.periodFrom.slice(0, 4)}-${invoice.periodFrom.slice(5, 7)}`
+          : toPeriodKey(invoice.issueDate ?? invoice.dueDate);
+        if (whatsappAlreadySent(data.whatsappLogs, tenant.id, billingMonth)) {
+          continue;
+        }
+        const ok = await sendInvoiceWhatsAppMessage(invoice.id);
+        if (ok) sent++;
+        else failed++;
+      }
+
+      if (sent > 0) toast.success(`${sent} WhatsApp invoice(s) sent`);
+      if (failed > 0) toast.error(`${failed} WhatsApp invoice(s) failed`);
+      return { sent, failed };
+    },
+    [data.invoices, data.tenants, data.whatsappLogs, getWhatsAppSettings, sendInvoiceWhatsAppMessage],
+  );
+
+  /** Automatic monthly WhatsApp run — sends invoices for all active tenants. */
+  const runAutomaticWhatsAppSend = useCallback(async (): Promise<{ sent: number; failed: number }> => {
+    const settings = getWhatsAppSettings();
+    if (!settings.autoSendEnabled) {
+      return { sent: 0, failed: 0 };
+    }
+    const result = await sendAllInvoicesWhatsApp();
+    sendUpdate("whatsappSettings", WHATSAPP_SETTINGS_ID, {
+      lastAutoRunAt: nowISO(),
+    } as unknown as Record<string, unknown>);
+    pushHistory({
+      action: "Edited" as HistoryAction,
+      entityType: "WhatsApp Settings",
+      entityId: WHATSAPP_SETTINGS_ID,
+      entityName: "WhatsApp Settings",
+      summary: `Automatic WhatsApp send run completed — ${result.sent} sent, ${result.failed} failed`,
+    });
+    return result;
+  }, [getWhatsAppSettings, sendAllInvoicesWhatsApp, sendUpdate, pushHistory]);
+
+  /** Scheduler — checks on app load if today is the send day and runs the automatic send. */
+  useEffect(() => {
+    const settings = data.whatsappSettings.find((s) => s.id === WHATSAPP_SETTINGS_ID);
+    if (!settings?.autoSendEnabled) return;
+    const today = new Date();
+    const todayDay = today.getDate();
+    const lastRun = settings.lastAutoRunAt ? new Date(settings.lastAutoRunAt) : null;
+    const sameDay = lastRun && lastRun.getDate() === todayDay && lastRun.getMonth() === today.getMonth() && lastRun.getFullYear() === today.getFullYear();
+    if (todayDay === settings.sendDayOfMonth && !sameDay) {
+      void runAutomaticWhatsAppSend().catch((err) => {
+        console.error("[whatsapp] automatic send failed", err);
+        toast.error("Automatic WhatsApp send failed — check logs");
+      });
+    }
+  }, [data.whatsappSettings, runAutomaticWhatsAppSend]);
+
   // ────────────────────────────── Lookups ──────────────────────────────
   const getOwnerById = useCallback((id: string) => data.owners.find((o) => o.id === id), [data.owners]);
   const getBuildingById = useCallback((id: string) => data.buildings.find((b) => b.id === id), [data.buildings]);
@@ -2362,5 +2654,13 @@ export const [DataProvider, useData] = createContextHook(() => {
     updateOverdueInvoices,
     buildPdfContext,
     companyInfo: COMPANY_INFO,
+    // WhatsApp automation
+    getWhatsAppSettings,
+    updateWhatsAppSettings,
+    testWhatsApp,
+    sendInvoiceWhatsAppMessage,
+    resendWhatsAppMessage,
+    sendAllInvoicesWhatsApp,
+    runAutomaticWhatsAppSend,
   };
 });

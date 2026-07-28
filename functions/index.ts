@@ -1,6 +1,7 @@
 // functions/index.ts — Worker entrypoint.
 // Routes WebSocket upgrades and HTTP requests to the shared Workspace DO.
-// Sends invoice emails via the Gmail API (OAuth2) from namlity@gmail.com.
+// Sends invoice emails via the Gmail API (OAuth2) from namlity@gmail.com).
+// Sends invoice WhatsApp messages via the Meta WhatsApp Cloud API.
 
 export { Workspace } from "./workspace";
 
@@ -11,7 +12,14 @@ type Env = {
   GMAIL_CLIENT_SECRET?: string;
   GMAIL_REFRESH_TOKEN?: string;
   GMAIL_SENDER?: string; // e.g. "namlity@gmail.com"
+  // WhatsApp Cloud API credentials — set as project env vars (secrets).
+  WHATSAPP_ACCESS_TOKEN?: string;
+  WHATSAPP_PHONE_NUMBER_ID?: string;
+  WHATSAPP_VERIFY_TOKEN?: string;
+  WHATSAPP_BUSINESS_ACCOUNT_ID?: string;
 };
+
+const WHATSAPP_API_BASE = "https://graph.facebook.com/v21.0";
 
 // A single shared workspace for the whole project. Anyone with the app URL
 // joins the same workspace, sees the same data, and gets live updates.
@@ -201,6 +209,193 @@ async function sendInvoiceEmail(
   }
 }
 
+// ──────────────────────────── WhatsApp Cloud API ────────────────────────────
+
+interface WhatsAppSendRequest {
+  /** Recipient phone number in international format without + (e.g. "9733xxxxxxx"). */
+  to: string;
+  /** Message body text (required for text messages, ignored for document-only). */
+  body?: string;
+  /** PDF attachment as base64 (optional). When provided, a document message is sent. */
+  attachmentName?: string;
+  attachmentBase64?: string;
+  /** WhatsApp Cloud API phone_number_id to send from (falls back to env). */
+  phoneNumberId?: string;
+}
+
+/** Verify the WhatsApp webhook — Meta sends hub.challenge during setup. */
+function whatsappWebhookVerify(url: URL, env: Env): Response {
+  const mode = url.searchParams.get("hub.mode");
+  const token = url.searchParams.get("hub.verify_token");
+  const challenge = url.searchParams.get("hub.challenge");
+
+  if (mode === "subscribe" && token === env.WHATSAPP_VERIFY_TOKEN) {
+    return new Response(challenge ?? "", { status: 200 });
+  }
+  return new Response("Forbidden", { status: 403 });
+}
+
+/** Receive WhatsApp status updates (delivered / read / failed). */
+async function whatsappWebhookReceive(request: Request): Promise<Response> {
+  try {
+    const payload = (await request.json()) as unknown;
+    console.log("[whatsapp] webhook received", JSON.stringify(payload).slice(0, 500));
+    // The status update will be processed by the frontend via the shared workspace.
+    // For now, acknowledge receipt (200) so Meta doesn't retry.
+    return new Response("OK", { status: 200 });
+  } catch {
+    return new Response("OK", { status: 200 });
+  }
+}
+
+/** Test the WhatsApp connection by fetching the phone number details. */
+async function whatsappTestConnection(env: Env): Promise<Response> {
+  if (!env.WHATSAPP_ACCESS_TOKEN || !env.WHATSAPP_PHONE_NUMBER_ID) {
+    return Response.json({
+      ok: false,
+      connected: false,
+      error: "WHATSAPP_ACCESS_TOKEN or WHATSAPP_PHONE_NUMBER_ID not configured",
+    });
+  }
+
+  try {
+    const res = await fetch(
+      `${WHATSAPP_API_BASE}/${env.WHATSAPP_PHONE_NUMBER_ID}`,
+      {
+        headers: { Authorization: `Bearer ${env.WHATSAPP_ACCESS_TOKEN}` },
+      },
+    );
+
+    if (!res.ok) {
+      const text = await res.text().catch(() => "unknown");
+      return Response.json({
+        ok: false,
+        connected: false,
+        error: `WhatsApp API error ${res.status}: ${text}`,
+      });
+    }
+
+    const data = (await res.json()) as { display_phone_number?: string; verified_name?: string };
+    return Response.json({
+      ok: true,
+      connected: true,
+      phoneNumber: data.display_phone_number,
+      businessName: data.verified_name,
+    });
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : "Network error";
+    return Response.json({ ok: false, connected: false, error: msg });
+  }
+}
+
+/** Send a WhatsApp message (text and/or document with PDF attachment). */
+async function whatsappSendMessage(
+  req: WhatsAppSendRequest,
+  env: Env,
+): Promise<Response> {
+  if (!req.to) {
+    return Response.json({ ok: false, error: "Missing recipient phone number" }, { status: 400 });
+  }
+
+  const token = env.WHATSAPP_ACCESS_TOKEN;
+  const phoneNumberId = req.phoneNumberId || env.WHATSAPP_PHONE_NUMBER_ID;
+
+  if (!token || !phoneNumberId) {
+    return Response.json({
+      ok: false,
+      error: "WhatsApp not configured — set WHATSAPP_ACCESS_TOKEN and WHATSAPP_PHONE_NUMBER_ID",
+    }, { status: 500 });
+  }
+
+  try {
+    // If a PDF attachment is provided, first upload the media to WhatsApp.
+    let mediaId: string | undefined;
+    if (req.attachmentBase64 && req.attachmentName) {
+      const mediaRes = await fetch(
+        `${WHATSAPP_API_BASE}/${phoneNumberId}/media`,
+        {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${token}`,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            messaging_product: "whatsapp",
+            type: "application/pdf",
+            filename: req.attachmentName,
+            // The Cloud API expects a data URL or an HTTPS URL for the media.
+            // We pass it as a base64 data URL.
+            // Note: for large PDFs you may need to host the file and pass a URL instead.
+            url: `data:application/pdf;name=${req.attachmentName};base64,${req.attachmentBase64}`,
+          }),
+        },
+      );
+
+      if (mediaRes.ok) {
+        const mediaData = (await mediaRes.json()) as { id?: string };
+        mediaId = mediaData.id;
+      } else {
+        const errText = await mediaRes.text().catch(() => "media upload failed");
+        console.error("[whatsapp] media upload failed", mediaRes.status, errText);
+        // Continue without attachment if upload fails — send text only.
+      }
+    }
+
+    // Send the message.
+    let messageBody: Record<string, unknown>;
+
+    if (mediaId) {
+      // Document message with caption
+      messageBody = {
+        messaging_product: "whatsapp",
+        to: req.to,
+        type: "document",
+        document: {
+          id: mediaId,
+          filename: req.attachmentName ?? "invoice.pdf",
+          caption: req.body ?? "",
+        },
+      };
+    } else {
+      // Text-only message
+      messageBody = {
+        messaging_product: "whatsapp",
+        to: req.to,
+        type: "text",
+        text: { body: req.body ?? "" },
+      };
+    }
+
+    const sendRes = await fetch(
+      `${WHATSAPP_API_BASE}/${phoneNumberId}/messages`,
+      {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(messageBody),
+      },
+    );
+
+    if (!sendRes.ok) {
+      const errText = await sendRes.text().catch(() => "WhatsApp API error");
+      console.error("[whatsapp] send failed", sendRes.status, errText);
+      return Response.json({ ok: false, error: `WhatsApp API ${sendRes.status}: ${errText}` }, { status: 502 });
+    }
+
+    const result = (await sendRes.json()) as {
+      messages?: Array<{ id?: string }>;
+    };
+    const messageId = result.messages?.[0]?.id;
+    return Response.json({ ok: true, messageId, sentTo: req.to });
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : "Unknown error";
+    console.error("[whatsapp] send failed", msg);
+    return Response.json({ ok: false, error: msg }, { status: 500 });
+  }
+}
+
 export default {
   async fetch(request: Request, env: Env): Promise<Response> {
     const url = new URL(request.url);
@@ -214,6 +409,34 @@ export default {
       try {
         const req = (await request.json()) as SendInvoiceRequest;
         return sendInvoiceEmail(req, env);
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : "Invalid JSON";
+        return Response.json({ ok: false, error: msg }, { status: 400 });
+      }
+    }
+
+    // ── WhatsApp Cloud API endpoints ──
+
+    // Webhook verification (GET) — Meta calls this when you set up the webhook.
+    if (url.pathname === "/api/whatsapp/webhook" && request.method === "GET") {
+      return whatsappWebhookVerify(url, env);
+    }
+
+    // Webhook for delivery/read status updates (POST) — Meta sends status events here.
+    if (url.pathname === "/api/whatsapp/webhook" && request.method === "POST") {
+      return whatsappWebhookReceive(request);
+    }
+
+    // Test connection (POST) — checks that the access token + phone number ID are valid.
+    if (url.pathname === "/api/whatsapp/test" && request.method === "POST") {
+      return whatsappTestConnection(env);
+    }
+
+    // Send a WhatsApp message (POST) — text or document with optional PDF attachment.
+    if (url.pathname === "/api/whatsapp/send" && request.method === "POST") {
+      try {
+        const req = (await request.json()) as WhatsAppSendRequest;
+        return whatsappSendMessage(req, env);
       } catch (err) {
         const msg = err instanceof Error ? err.message : "Invalid JSON";
         return Response.json({ ok: false, error: msg }, { status: 400 });

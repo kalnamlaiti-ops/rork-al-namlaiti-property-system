@@ -19,6 +19,7 @@ import {
   CheckCircle,
   Zap,
   Mail,
+  MessageCircle,
   Loader2,
 } from "lucide-react";
 import { format } from "date-fns";
@@ -43,6 +44,8 @@ export default function Invoices() {
     generateMonthlyInvoices,
     sendInvoice,
     sendAllInvoices,
+    sendInvoiceWhatsAppMessage,
+    sendAllInvoicesWhatsApp,
     markInvoicePaid,
     voidInvoice,
     buildPdfContext,
@@ -60,6 +63,8 @@ export default function Invoices() {
   const [generating, setGenerating] = useState(false);
   const [sendingAll, setSendingAll] = useState(false);
   const [busyInvoiceId, setBusyInvoiceId] = useState<string | null>(null);
+  const [busyWhatsAppId, setBusyWhatsAppId] = useState<string | null>(null);
+  const [sendingAllWa, setSendingAllWa] = useState(false);
 
   const totalBilled = invoices.reduce((sum, i) => sum + i.amount, 0);
   const totalCollected = totalBilled - invoices.reduce((sum, i) => sum + i.balance, 0);
@@ -117,6 +122,24 @@ export default function Invoices() {
     }
   };
 
+  const handleSendAllWhatsApp = async () => {
+    setSendingAllWa(true);
+    try {
+      await sendAllInvoicesWhatsApp();
+    } finally {
+      setSendingAllWa(false);
+    }
+  };
+
+  const handleSendWhatsApp = async (invoice: Invoice) => {
+    setBusyWhatsAppId(invoice.id);
+    try {
+      await sendInvoiceWhatsAppMessage(invoice.id);
+    } finally {
+      setBusyWhatsAppId(null);
+    }
+  };
+
   const handleSend = async (invoice: Invoice) => {
     setBusyInvoiceId(invoice.id);
     try {
@@ -167,6 +190,10 @@ export default function Invoices() {
         <Button onClick={handleSendAll} disabled={sendingAll} variant="outline">
           {sendingAll ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Mail className="mr-2 h-4 w-4" />}
           {sendingAll ? "Sending..." : "Send All Drafts"}
+        </Button>
+        <Button onClick={handleSendAllWhatsApp} disabled={sendingAllWa} variant="outline">
+          {sendingAllWa ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <MessageCircle className="mr-2 h-4 w-4" />}
+          {sendingAllWa ? "Sending..." : "Send All via WhatsApp"}
         </Button>
       </div>
 
@@ -279,6 +306,7 @@ export default function Invoices() {
                   const unit = getUnitById(i.unitId);
                   const building = unit ? getBuildingById(unit.buildingId) : undefined;
                   const isBusy = busyInvoiceId === i.id;
+                  const isWaBusy = busyWhatsAppId === i.id;
                   return (
                     <tr key={i.id} className="hover:bg-muted/30">
                       <td className="px-4 py-3 font-medium">{i.invoiceNumber}</td>
@@ -303,6 +331,9 @@ export default function Invoices() {
                           </Button>
                           <Button variant="ghost" size="sm" onClick={() => handleSend(i)} disabled={isBusy || i.status === "Paid" || i.status === "Cancelled"} title="Send/Resend Email">
                             {isBusy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Send className="h-3.5 w-3.5" />}
+                          </Button>
+                          <Button variant="ghost" size="sm" onClick={() => handleSendWhatsApp(i)} disabled={isWaBusy || i.status === "Paid" || i.status === "Cancelled" || !tenant?.phone} title="Send via WhatsApp">
+                            {isWaBusy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <MessageCircle className="h-3.5 w-3.5" />}
                           </Button>
                           <Button variant="ghost" size="sm" onClick={() => handleDownload(i)} title="Download PDF">
                             <Download className="h-3.5 w-3.5" />

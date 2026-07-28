@@ -15,6 +15,7 @@ import {
   NotebookPen,
   ArrowLeftRight,
   MessageSquareWarning,
+  MessageCircle,
   Wrench,
   Truck,
   Box,
@@ -73,6 +74,7 @@ const sidebarNav = [
     section: "ADMIN",
     items: [
       { name: "Users", href: "/users", icon: Shield },
+      { name: "WhatsApp", href: "/whatsapp", icon: MessageCircle },
       { name: "Audit History", href: "/history", icon: History },
     ],
   },

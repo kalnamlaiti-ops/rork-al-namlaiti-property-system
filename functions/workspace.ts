@@ -28,6 +28,8 @@ export interface DataStore {
   vendors: unknown[];
   assets: unknown[];
   documents: unknown[];
+  whatsappLogs: unknown[];
+  whatsappSettings: unknown[];
   history: unknown[];
 }
 
@@ -51,6 +53,8 @@ const COLLECTION_KEYS: (keyof DataStore)[] = [
   "vendors",
   "assets",
   "documents",
+  "whatsappLogs",
+  "whatsappSettings",
   "history",
 ];
 
@@ -74,6 +78,8 @@ const EMPTY_STORE: DataStore = {
   vendors: [],
   assets: [],
   documents: [],
+  whatsappLogs: [],
+  whatsappSettings: [],
   history: [],
 };
 
@@ -287,6 +293,8 @@ export class Workspace extends DurableObject<Env> {
       Complaint: "complaints",
       "Maintenance Request": "maintenanceRequests",
       Document: "documents",
+      "WhatsApp Log": "whatsappLogs",
+      "WhatsApp Settings": "whatsappSettings",
     };
     const collection = map[entry.entityType];
     if (!collection) return { ok: false, error: `unknown entity type: ${entry.entityType}` };

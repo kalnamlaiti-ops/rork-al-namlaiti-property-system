@@ -17,6 +17,7 @@ import {
   XCircle,
   Loader2,
   Mail,
+  MessageCircle,
   Printer,
 } from "lucide-react";
 import { format } from "date-fns";
@@ -38,6 +39,7 @@ export default function InvoiceDetail() {
     getUnitById,
     getBuildingById,
     sendInvoice,
+    sendInvoiceWhatsAppMessage,
     markInvoicePaid,
     voidInvoice,
     buildPdfContext,
@@ -47,6 +49,7 @@ export default function InvoiceDetail() {
   const [paymentDialog, setPaymentDialog] = useState(false);
   const [previewDialog, setPreviewDialog] = useState(false);
   const [sending, setSending] = useState(false);
+  const [sendingWa, setSendingWa] = useState(false);
   const [markingPaid, setMarkingPaid] = useState(false);
   const [voiding, setVoiding] = useState(false);
   const [previewUrl, setPreviewUrl] = useState<string>("");
@@ -75,6 +78,15 @@ export default function InvoiceDetail() {
       await sendInvoice(invoice.id);
     } finally {
       setSending(false);
+    }
+  };
+
+  const handleSendWhatsApp = async () => {
+    setSendingWa(true);
+    try {
+      await sendInvoiceWhatsAppMessage(invoice.id);
+    } finally {
+      setSendingWa(false);
     }
   };
 
@@ -135,6 +147,10 @@ export default function InvoiceDetail() {
           <Button variant="outline" onClick={handleSend} disabled={sending || isCancelled}>
             {sending ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Send className="mr-2 h-4 w-4" />}
             {invoice.emailStatus === "Sent" ? "Resend" : "Send"}
+          </Button>
+          <Button variant="outline" onClick={handleSendWhatsApp} disabled={sendingWa || isCancelled || !tenant?.phone} title={!tenant?.phone ? "Tenant has no phone number" : "Send via WhatsApp"}>
+            {sendingWa ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <MessageCircle className="mr-2 h-4 w-4" />}
+            WhatsApp
           </Button>
           {canEdit && (
             <Button variant="outline" onClick={() => setEditDialog(true)}>

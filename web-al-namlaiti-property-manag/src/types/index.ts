@@ -8,6 +8,10 @@ export type TenantStatus = "Active" | "Inactive";
 export type LeaseStatus = "Active" | "Expired" | "Terminating" | "Draft";
 export type InvoiceStatus = "Draft" | "Sent" | "Partial" | "Paid" | "Overdue" | "Cancelled";
 export type EmailStatus = "Not Sent" | "Sent" | "Failed" | "Queued";
+
+// ── WhatsApp delivery ──
+export type WhatsAppStatus = "not_sent" | "queued" | "sent" | "delivered" | "read" | "failed";
+export type WhatsAppChannel = "email" | "whatsapp" | "both";
 export type PaymentMethod = "Bank Transfer" | "Cash" | "Cheque" | "Card" | "Online";
 export type ExpenseStatus = "Pending" | "Approved" | "Paid" | "Rejected" | "Invoiced";
 export type EWABillStatus = "Pending" | "Invoiced" | "Paid";
@@ -375,4 +379,62 @@ export interface HistoryEntry {
   recovered?: boolean;
   /** Short label of the user who performed the action (e.g. "Guest-3f2a"). */
   actor?: string;
+}
+
+// ──────────────────────────── WhatsApp automation ────────────────────────────
+
+/** Delivery status for a WhatsApp message log entry. */
+
+/** A single WhatsApp message log entry — tracks every invoice sent via WhatsApp. */
+export interface WhatsAppLog {
+  id: string;
+  /** Tenant the message was sent to. */
+  tenantId: string;
+  /** Invoice the message relates to. */
+  invoiceId: string;
+  /** Billing month key, e.g. "2026-07" — used for duplicate prevention. */
+  billingMonth: string;
+  /** Recipient phone number in international format (e.g. "9733xxxxxxx"). */
+  phoneNumber: string;
+  /** Message ID returned by the WhatsApp Cloud API. */
+  whatsappMessageId?: string;
+  /** When the send was attempted (ISO timestamp). */
+  sentAt: string;
+  /** Delivery status (updated via webhook or send response). */
+  status: WhatsAppStatus;
+  /** Read status — set true when WhatsApp reports the message was read. */
+  readStatus?: boolean;
+  /** Failure flag for dashboard filtering. */
+  failed?: boolean;
+  /** Error message if sending failed. */
+  errorMessage?: string;
+  /** Number of retry attempts (max 3). */
+  retryCount: number;
+  /** True when this log represents a resend (not the first attempt). */
+  isResend?: boolean;
+  /** Whether a PDF invoice was attached. */
+  hasAttachment?: boolean;
+}
+
+/** WhatsApp integration settings (stored in the workspace, toggled by admin). */
+export interface WhatsAppSettings {
+  id: string;
+  /** Whether automatic monthly sending is enabled. */
+  autoSendEnabled: boolean;
+  /** Day of month to run the automatic send (default 1). */
+  sendDayOfMonth: number;
+  /** Which delivery channel to use for invoices. */
+  channel: WhatsAppChannel;
+  /** Whether the WhatsApp API credentials are configured (read from server). */
+  connected: boolean;
+  /** Default country code prefix for phone normalization (e.g. "973"). */
+  defaultCountryCode: string;
+  /** ISO timestamp of the last successful automatic run. */
+  lastAutoRunAt?: string;
+  /** ISO timestamp of the last connection test. */
+  lastTestedAt?: string;
+  /** Whether the last connection test succeeded. */
+  lastTestOk?: boolean;
+  /** Error message from the last connection test. */
+  lastTestError?: string;
 }
