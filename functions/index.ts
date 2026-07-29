@@ -248,7 +248,173 @@ async function whatsappWebhookReceive(request: Request): Promise<Response> {
   }
 }
 
-/** Test the WhatsApp connection by fetching the phone number details. */
+/**
+ * Resolve the actual phone_number_id to use for sending.
+ *
+ * The env var WHATSAPP_PHONE_NUMBER_ID might contain:
+ *  (a) a phone number ID  → direct GET works
+ *  (b) a WABA ID          → query /phone_numbers edge
+ *  (c) some other ID      → use debug_token to discover WABA IDs from granular_scopes
+ *
+ * Tries (a) → (b) → (c), caches the first successful result.
+ */
+let cachedPhoneNumberId = "";
+
+interface WhatsAppPhoneNumber {
+  id: string;
+  displayPhone?: string;
+  verifiedName?: string;
+  codeVerificationStatus?: string;
+  platformType?: string;
+  qualityRating?: string;
+}
+
+async function fetchPhoneNumbersFromWaba(
+  token: string,
+  wabaId: string,
+): Promise<WhatsAppPhoneNumber[]> {
+  try {
+    const res = await fetch(`${WHATSAPP_API_BASE}/${wabaId}/phone_numbers`, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    if (!res.ok) return [];
+    const data = (await res.json()) as {
+      data?: Array<{
+        id: string;
+        display_phone_number?: string;
+        verified_name?: string;
+        code_verification_status?: string;
+        platform_type?: string;
+        quality_rating?: string;
+      }>;
+    };
+    return (data.data ?? []).map((p) => ({
+      id: p.id,
+      displayPhone: p.display_phone_number,
+      verifiedName: p.verified_name,
+      codeVerificationStatus: p.code_verification_status,
+      platformType: p.platform_type,
+      qualityRating: p.quality_rating,
+    }));
+  } catch {
+    return [];
+  }
+}
+
+async function resolvePhoneNumberId(env: Env): Promise<{ id: string; displayPhone?: string; verifiedName?: string; error?: string }> {
+  if (cachedPhoneNumberId) {
+    return { id: cachedPhoneNumberId };
+  }
+
+  const token = env.WHATSAPP_ACCESS_TOKEN;
+  const providedId = env.WHATSAPP_PHONE_NUMBER_ID;
+
+  if (!token || !providedId) {
+    return { id: "", error: "WHATSAPP_ACCESS_TOKEN or WHATSAPP_PHONE_NUMBER_ID not configured" };
+  }
+
+  const allNumbers: WhatsAppPhoneNumber[] = [];
+  const triedWabaIds = new Set<string>();
+
+  // Strategy 1: try direct GET on the provided ID (works if it's a phone number ID)
+  try {
+    const res = await fetch(`${WHATSAPP_API_BASE}/${providedId}`, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    if (res.ok) {
+      const data = (await res.json()) as { display_phone_number?: string; verified_name?: string; id?: string; code_verification_status?: string };
+      const phone: WhatsAppPhoneNumber = {
+        id: data.id ?? providedId,
+        displayPhone: data.display_phone_number,
+        verifiedName: data.verified_name,
+        codeVerificationStatus: data.code_verification_status,
+      };
+      cachedPhoneNumberId = phone.id;
+      return phone;
+    }
+  } catch {
+    // fall through
+  }
+
+  // Strategy 2: the provided ID might be a WABA ID — query its phone_numbers edge
+  const fromWaba = await fetchPhoneNumbersFromWaba(token, providedId);
+  if (fromWaba.length > 0) {
+    allNumbers.push(...fromWaba);
+    triedWabaIds.add(providedId);
+  }
+
+  // Strategy 3: use debug_token to discover WABA IDs from granular_scopes
+  try {
+    const debugRes = await fetch(
+      `https://graph.facebook.com/debug_token?input_token=${token}&access_token=${token}`,
+    );
+    if (debugRes.ok) {
+      const debugData = (await debugRes.json()) as {
+        data?: {
+          granular_scopes?: Array<{ scope: string; target_ids?: string[] }>;
+        };
+      };
+      const scopes = debugData.data?.granular_scopes ?? [];
+      const wabaIds = new Set<string>();
+      for (const s of scopes) {
+        if (s.target_ids) {
+          for (const tid of s.target_ids) wabaIds.add(tid);
+        }
+      }
+      for (const wabaId of wabaIds) {
+        if (triedWabaIds.has(wabaId)) continue;
+        const numbers = await fetchPhoneNumbersFromWaba(token, wabaId);
+        if (numbers.length > 0) {
+          allNumbers.push(...numbers);
+          triedWabaIds.add(wabaId);
+        }
+      }
+    }
+  } catch {
+    // fall through
+  }
+
+  // Strategy 4: query /me/accounts (business accounts linked to the user)
+  if (allNumbers.length === 0) {
+    try {
+      const meRes = await fetch(`${WHATSAPP_API_BASE}/me/accounts?fields=id,name`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (meRes.ok) {
+        const meData = (await meRes.json()) as { data?: Array<{ id: string; name?: string }> };
+        for (const acct of meData.data ?? []) {
+          if (triedWabaIds.has(acct.id)) continue;
+          const numbers = await fetchPhoneNumbersFromWaba(token, acct.id);
+          if (numbers.length > 0) {
+            allNumbers.push(...numbers);
+          }
+        }
+      }
+    } catch {
+      // all strategies failed
+    }
+  }
+
+  if (allNumbers.length === 0) {
+    return { id: "", error: `Could not resolve a WhatsApp phone number ID from "${providedId}". Make sure the access token has whatsapp_business_messaging permission and the phone number is registered.` };
+  }
+
+  // Pick the best phone number:
+  // 1. Prefer verified numbers (code_verification_status === "VERIFIED")
+  // 2. Among those, prefer non-test numbers (verified_name doesn't contain "test")
+  // 3. Fall back to any non-test number
+  // 4. Last resort: test number (Meta's default test number can send but isn't production)
+  const verified = allNumbers.filter((n) => n.codeVerificationStatus === "VERIFIED");
+  const nonTest = (verified.length > 0 ? verified : allNumbers).filter(
+    (n) => !/test/i.test(n.verifiedName ?? ""),
+  );
+  const best = nonTest[0] ?? verified[0] ?? allNumbers[0];
+
+  cachedPhoneNumberId = best.id;
+  return best;
+}
+
+/** Test the WhatsApp connection by resolving and fetching the phone number details. */
 async function whatsappTestConnection(env: Env): Promise<Response> {
   if (!env.WHATSAPP_ACCESS_TOKEN || !env.WHATSAPP_PHONE_NUMBER_ID) {
     return Response.json({
@@ -258,34 +424,28 @@ async function whatsappTestConnection(env: Env): Promise<Response> {
     });
   }
 
-  try {
-    const res = await fetch(
-      `${WHATSAPP_API_BASE}/${env.WHATSAPP_PHONE_NUMBER_ID}`,
-      {
-        headers: { Authorization: `Bearer ${env.WHATSAPP_ACCESS_TOKEN}` },
-      },
-    );
-
-    if (!res.ok) {
-      const text = await res.text().catch(() => "unknown");
-      return Response.json({
-        ok: false,
-        connected: false,
-        error: `WhatsApp API error ${res.status}: ${text}`,
-      });
-    }
-
-    const data = (await res.json()) as { display_phone_number?: string; verified_name?: string };
-    return Response.json({
-      ok: true,
-      connected: true,
-      phoneNumber: data.display_phone_number,
-      businessName: data.verified_name,
-    });
-  } catch (err) {
-    const msg = err instanceof Error ? err.message : "Network error";
-    return Response.json({ ok: false, connected: false, error: msg });
+  const resolved = await resolvePhoneNumberId(env);
+  if (resolved.error || !resolved.id) {
+    return Response.json({ ok: false, connected: false, error: resolved.error ?? "Failed to resolve phone number ID" });
   }
+
+  // Check if the selected number is a test number (not production-ready)
+  const isTestNumber = /test/i.test(resolved.verifiedName ?? "");
+  const isVerified = resolved.codeVerificationStatus === "VERIFIED";
+
+  return Response.json({
+    ok: true,
+    connected: true,
+    phoneNumber: resolved.displayPhone ?? "resolved",
+    businessName: resolved.verifiedName ?? "WhatsApp Business",
+    phoneNumberId: resolved.id,
+    verified: isVerified,
+    warning: isTestNumber
+      ? "Using Meta test number — your business number (+973 1725 3953) needs verification in Meta Business Manager before it can send messages."
+      : !isVerified
+        ? "Phone number is not verified — complete verification in Meta Business Manager."
+        : undefined,
+  });
 }
 
 /** Send a WhatsApp message (text and/or document with PDF attachment). */
@@ -298,7 +458,19 @@ async function whatsappSendMessage(
   }
 
   const token = env.WHATSAPP_ACCESS_TOKEN;
-  const phoneNumberId = req.phoneNumberId || env.WHATSAPP_PHONE_NUMBER_ID;
+  let phoneNumberId = req.phoneNumberId || cachedPhoneNumberId || "";
+
+  // If no cached phone number ID, resolve it from the env var
+  if (!phoneNumberId) {
+    const resolved = await resolvePhoneNumberId(env);
+    if (resolved.error || !resolved.id) {
+      return Response.json({
+        ok: false,
+        error: resolved.error ?? "Failed to resolve WhatsApp phone number ID",
+      }, { status: 500 });
+    }
+    phoneNumberId = resolved.id;
+  }
 
   if (!token || !phoneNumberId) {
     return Response.json({
@@ -397,6 +569,7 @@ async function whatsappSendMessage(
 }
 
 export default {
+  // Worker entrypoint — routes HTTP and WebSocket requests.
   async fetch(request: Request, env: Env): Promise<Response> {
     const url = new URL(request.url);
 
