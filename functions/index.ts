@@ -258,7 +258,10 @@ async function whatsappWebhookReceive(request: Request): Promise<Response> {
  *
  * Tries (a) → (b) → (c), caches the first successful result.
  */
+// Cache the resolved phone number ID with a timestamp so credential changes invalidate it.
 let cachedPhoneNumberId = "";
+let cachedAt = 0;
+const CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes
 
 interface WhatsAppPhoneNumber {
   id: string;
@@ -302,9 +305,11 @@ async function fetchPhoneNumbersFromWaba(
 }
 
 async function resolvePhoneNumberId(env: Env): Promise<{ id: string; displayPhone?: string; verifiedName?: string; error?: string }> {
-  if (cachedPhoneNumberId) {
+  if (cachedPhoneNumberId && (Date.now() - cachedAt) < CACHE_TTL_MS) {
     return { id: cachedPhoneNumberId };
   }
+  cachedPhoneNumberId = "";
+  cachedAt = 0;
 
   const token = env.WHATSAPP_ACCESS_TOKEN;
   const providedId = env.WHATSAPP_PHONE_NUMBER_ID;
@@ -330,6 +335,7 @@ async function resolvePhoneNumberId(env: Env): Promise<{ id: string; displayPhon
         codeVerificationStatus: data.code_verification_status,
       };
       cachedPhoneNumberId = phone.id;
+      cachedAt = Date.now();
       return phone;
     }
   } catch {
@@ -411,6 +417,7 @@ async function resolvePhoneNumberId(env: Env): Promise<{ id: string; displayPhon
   const best = nonTest[0] ?? verified[0] ?? allNumbers[0];
 
   cachedPhoneNumberId = best.id;
+  cachedAt = Date.now();
   return best;
 }
 
@@ -569,7 +576,7 @@ async function whatsappSendMessage(
 }
 
 export default {
-  // Worker entrypoint — routes HTTP and WebSocket requests.
+  // Worker entrypoint — routes HTTP, WebSocket, and WhatsApp API requests.
   async fetch(request: Request, env: Env): Promise<Response> {
     const url = new URL(request.url);
 
