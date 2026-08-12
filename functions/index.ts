@@ -229,22 +229,100 @@ function whatsappWebhookVerify(url: URL, env: Env): Response {
   const token = url.searchParams.get("hub.verify_token");
   const challenge = url.searchParams.get("hub.challenge");
 
-  if (mode === "subscribe" && token === env.WHATSAPP_VERIFY_TOKEN) {
+  if (mode === "subscribe" && token && env.WHATSAPP_VERIFY_TOKEN && token === env.WHATSAPP_VERIFY_TOKEN) {
     return new Response(challenge ?? "", { status: 200 });
   }
+  console.log("[whatsapp] webhook verify failed", { mode, hasToken: !!token, hasEnvToken: !!env.WHATSAPP_VERIFY_TOKEN });
   return new Response("Forbidden", { status: 403 });
 }
 
-/** Receive WhatsApp status updates (delivered / read / failed). */
-async function whatsappWebhookReceive(request: Request): Promise<Response> {
+/**
+ * Receive WhatsApp webhook events (status updates + incoming messages).
+ * Meta sends status updates (sent/delivered/read/failed) and incoming messages here.
+ * We parse the payload, extract status updates, and forward them to the Workspace DO
+ * so WhatsAppLog entries are updated in real-time across all connected clients.
+ */
+async function whatsappWebhookReceive(request: Request, env: Env): Promise<Response> {
   try {
-    const payload = (await request.json()) as unknown;
+    const payload = (await request.json()) as {
+      entry?: Array<{
+        id?: string;
+        changes?: Array<{
+          field?: string;
+          value?: {
+            messaging_product?: string;
+            statuses?: Array<{
+              id: string;
+              status: string;
+              recipient_id?: string;
+              timestamp?: string;
+              errors?: Array<{ code?: number; title?: string; message?: string }>;
+            }>;
+            messages?: Array<{
+              id: string;
+              from: string;
+              text?: { body: string };
+              timestamp?: string;
+            }>;
+          };
+        }>;
+      }>;
+    };
+
     console.log("[whatsapp] webhook received", JSON.stringify(payload).slice(0, 500));
-    // The status update will be processed by the frontend via the shared workspace.
-    // For now, acknowledge receipt (200) so Meta doesn't retry.
+
+    // Extract status updates and forward each to the DO
+    const entries = payload.entry ?? [];
+    for (const entry of entries) {
+      const changes = entry.changes ?? [];
+      for (const change of changes) {
+        const statuses = change.value?.statuses ?? [];
+        for (const status of statuses) {
+          const errors = status.errors?.[0];
+          await forwardWebhookStatus(env, {
+            messageId: status.id,
+            status: status.status,
+            timestamp: status.timestamp
+              ? new Date(Number(status.timestamp) * 1000).toISOString()
+              : new Date().toISOString(),
+            errorCode: errors?.code,
+            errorMessage: errors?.message ?? errors?.title,
+          });
+        }
+        // Incoming messages from tenants — logged for future use
+        const messages = change.value?.messages ?? [];
+        if (messages.length > 0) {
+          for (const msg of messages) {
+            console.log("[whatsapp] incoming message from", msg.from, "text:", msg.text?.body?.slice(0, 100));
+          }
+        }
+      }
+    }
+
+    // Always return 200 so Meta doesn't retry
     return new Response("OK", { status: 200 });
   } catch {
     return new Response("OK", { status: 200 });
+  }
+}
+
+/** Forward a parsed status update to the Workspace DO via HTTP POST. */
+async function forwardWebhookStatus(
+  env: Env,
+  status: { messageId: string; status: string; timestamp?: string; errorCode?: number; errorMessage?: string },
+): Promise<void> {
+  try {
+    const doUrl = `https://al-namlaiti-property-system-backend.rork.app/do/Workspace/${WORKSPACE_ID}`;
+    const res = await fetch(doUrl, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(status),
+    });
+    if (!res.ok) {
+      console.error("[whatsapp] DO status forward failed", res.status);
+    }
+  } catch (err) {
+    console.error("[whatsapp] DO status forward error", err);
   }
 }
 
@@ -576,7 +654,7 @@ async function whatsappSendMessage(
 }
 
 export default {
-  // Worker entrypoint — routes HTTP, WebSocket, and WhatsApp API requests.
+  // Worker entrypoint — routes HTTP, WebSocket, WhatsApp API, and webhook requests.
   async fetch(request: Request, env: Env): Promise<Response> {
     const url = new URL(request.url);
 
@@ -604,7 +682,7 @@ export default {
 
     // Webhook for delivery/read status updates (POST) — Meta sends status events here.
     if (url.pathname === "/api/whatsapp/webhook" && request.method === "POST") {
-      return whatsappWebhookReceive(request);
+      return whatsappWebhookReceive(request, env);
     }
 
     // Test connection (POST) — checks that the access token + phone number ID are valid.

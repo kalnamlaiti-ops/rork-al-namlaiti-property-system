@@ -125,7 +125,12 @@ export class Workspace extends DurableObject<Env> {
   // ─────────────────────────── HTTP entry ───────────────────────────
 
   override async fetch(request: Request): Promise<Response> {
+    // ── HTTP endpoint for WhatsApp webhook status updates ──
+    // The Worker parses Meta's webhook payload and forwards status updates here.
     if (request.headers.get("Upgrade") !== "websocket") {
+      if (request.method === "POST") {
+        return this.handleWebhookStatus(request);
+      }
       return new Response("expected websocket", { status: 426 });
     }
     const pair = new WebSocketPair();
@@ -343,6 +348,79 @@ export class Workspace extends DurableObject<Env> {
         ).catch((err: unknown) => console.error("persist failed", err)),
       );
     }, 150);
+  }
+
+  // ─────────────────────────── WhatsApp webhook status ───────────────────────────
+
+  /**
+   * Handle a WhatsApp webhook status update from the Worker.
+   * The Worker parses Meta's payload and sends a simplified JSON body:
+   *   { messageId: string, status: string, timestamp?: string }
+   * We find the matching WhatsAppLog, update its status, and broadcast.
+   */
+  private async handleWebhookStatus(request: Request): Promise<Response> {
+    try {
+      const body = (await request.json()) as {
+        messageId?: string;
+        status?: string;
+        timestamp?: string;
+        errorCode?: number;
+        errorMessage?: string;
+      };
+
+      if (!body.messageId || !body.status) {
+        return new Response("missing messageId or status", { status: 400 });
+      }
+
+      await this.ensureHydrated();
+      const store = this.store as DataStore;
+      const logs = store.whatsappLogs as Array<Record<string, unknown>>;
+
+      // Find the log entry by messageId (Meta's wamid)
+      const idx = logs.findIndex(
+        (log) => log.messageId === body.messageId,
+      );
+
+      if (idx < 0) {
+        // No matching log — acknowledge so Meta doesn't retry
+        return new Response("OK", { status: 200 });
+      }
+
+      // Map Meta status to our WhatsAppLog status
+      const statusMap: Record<string, string> = {
+        sent: "Sent",
+        delivered: "Delivered",
+        read: "Read",
+        failed: "Failed",
+      };
+      const mappedStatus = statusMap[body.status] ?? body.status;
+
+      const patch: Record<string, unknown> = {
+        status: mappedStatus,
+        deliveredAt: body.timestamp ?? new Date().toISOString(),
+      };
+      if (body.status === "failed") {
+        patch.error = body.errorMessage ?? "Delivery failed";
+        patch.errorCode = body.errorCode;
+      }
+
+      logs[idx] = { ...logs[idx], ...patch };
+
+      const op: MutateOp = {
+        kind: "update",
+        collection: "whatsappLogs",
+        id: logs[idx].id as string,
+        patch,
+      };
+
+      this.persist();
+      this.broadcast({ type: "patch", op, actor: "whatsapp-webhook" });
+
+      return new Response("OK", { status: 200 });
+    } catch (err) {
+      console.error("[do] webhook status failed", err);
+      return new Response("OK", { status: 200 });
+    }
   }
 
   // ─────────────────────────── Broadcast helpers ───────────────────────────
