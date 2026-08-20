@@ -1,9 +1,9 @@
 // src/lib/leaseAgreementGenerator.ts
 // Automatic lease agreement PDF generator.
 // Uses the approved master template (public/lease-agreement-template.png) as the
-// page background and overlays only the variable fields with the lease data.
-// The King of Bahrain image, legal text, signatures, and all other template
-// content remain exactly as in the master template.
+// page background and overlays only the English variable fields with the lease data.
+// All Arabic content, agreement conditions, signatures, and the King of Bahrain image
+// remain exactly as in the master template.
 
 import { jsPDF } from "jspdf";
 import type { Building, Lease, Tenant, Unit } from "@/types";
@@ -24,22 +24,20 @@ export type LeaseAgreementField =
   | "bldg_no"
   | "road"
   | "block"
+  | "lease_period"
   | "lease_period_from"
   | "lease_period_to"
-  | "sum_of_rent"
-  | "lease_start_date"
-  | "lease_end_date";
+  | "sum_of_rent";
 
 export interface LeaseAgreementValidationError {
   field: LeaseAgreementField;
   message: string;
 }
 
-const TEMPLATE_VERSION = "2.0";
+const TEMPLATE_VERSION = "2.1";
 const TEMPLATE_PATH = "/lease-agreement-template.png";
 
 const OWNER_NAME = "Husain Namlaiti";
-const LOCATION_NAME = "Manama";
 
 // A4 page in points (jsPDF default unit).
 const PAGE_WIDTH = 595.28;
@@ -47,18 +45,19 @@ const PAGE_HEIGHT = 841.89;
 
 // The template is 1132x1600 px. When scaled to fit page width it fills A4 exactly,
 // so pixel coordinates are converted to PDF points by multiplying by 595.28/1132.
-// All coordinates below are in PDF points and tuned for the new bilingual template.
+// All coordinates below are fixed and tuned for the English labels in the master template.
 const OVERLAYS = {
-  owner: { x: 79, y: 179, maxWidth: 360, size: 10, lineHeight: 12, patchWidth: 370 },
-  leaseholder: { x: 95, y: 197, maxWidth: 340, size: 10, lineHeight: 12, patchWidth: 350 },
-  type_of_rented_property: { x: 153, y: 216, maxWidth: 120, size: 10, lineHeight: 12, patchWidth: 125 },
-  location: { x: 347, y: 216, maxWidth: 100, size: 10, lineHeight: 12, patchWidth: 105 },
-  bldg_no: { x: 84, y: 234, maxWidth: 65, size: 10, lineHeight: 12, patchWidth: 70 },
-  road: { x: 184, y: 234, maxWidth: 70, size: 10, lineHeight: 12, patchWidth: 75 },
-  block: { x: 295, y: 234, maxWidth: 75, size: 10, lineHeight: 12, patchWidth: 80 },
-  lease_period_from: { x: 79, y: 271, maxWidth: 130, size: 10, lineHeight: 12, patchWidth: 135 },
-  lease_period_to: { x: 252, y: 271, maxWidth: 115, size: 10, lineHeight: 12, patchWidth: 120 },
-  sum_of_rent: { x: 110, y: 289, maxWidth: 340, size: 9, lineHeight: 12, patchWidth: 350 },
+  owner: { x: 68, y: 176, maxWidth: 380, size: 10, lineHeight: 12, patchWidth: 390 },
+  leaseholder: { x: 97, y: 195, maxWidth: 360, size: 10, lineHeight: 12, patchWidth: 370 },
+  type_of_rented_property: { x: 155, y: 213, maxWidth: 120, size: 10, lineHeight: 12, patchWidth: 125 },
+  location: { x: 329, y: 213, maxWidth: 120, size: 10, lineHeight: 12, patchWidth: 125 },
+  bldg_no: { x: 92, y: 231, maxWidth: 75, size: 10, lineHeight: 12, patchWidth: 80 },
+  road: { x: 192, y: 231, maxWidth: 85, size: 10, lineHeight: 12, patchWidth: 90 },
+  block: { x: 303, y: 231, maxWidth: 85, size: 10, lineHeight: 12, patchWidth: 90 },
+  lease_period: { x: 103, y: 250, maxWidth: 300, size: 10, lineHeight: 12, patchWidth: 310 },
+  lease_period_from: { x: 71, y: 268, maxWidth: 140, size: 10, lineHeight: 12, patchWidth: 145 },
+  lease_period_to: { x: 229, y: 268, maxWidth: 140, size: 10, lineHeight: 12, patchWidth: 145 },
+  sum_of_rent: { x: 108, y: 287, maxWidth: 380, size: 9, lineHeight: 12, patchWidth: 390 },
 } as const;
 
 // White patch under each placeholder so the new text replaces the original value.
@@ -69,74 +68,8 @@ export function getLeaseAgreementTemplateVersion(): string {
 }
 
 /**
- * Convert a number to English words (up to 999,999).
+ * Format a date as "dd MMMM yyyy" (e.g. "20 July 2026") to match the template.
  */
-export function numberToWords(num: number): string {
-  if (num === 0) return "zero";
-  if (num < 0) return "negative " + numberToWords(-num);
-
-  const ones = ["", "one", "two", "three", "four", "five", "six", "seven", "eight", "nine"];
-  const teens = ["ten", "eleven", "twelve", "thirteen", "fourteen", "fifteen", "sixteen", "seventeen", "eighteen", "nineteen"];
-  const tens = ["", "", "twenty", "thirty", "forty", "fifty", "sixty", "seventy", "eighty", "ninety"];
-
-  function convertChunk(n: number): string {
-    if (n === 0) return "";
-    if (n < 10) return ones[n];
-    if (n < 20) return teens[n - 10];
-    if (n < 100) {
-      const rem = n % 10;
-      return tens[Math.floor(n / 10)] + (rem ? " " + ones[rem] : "");
-    }
-    const rem = n % 100;
-    return ones[Math.floor(n / 100)] + " hundred" + (rem ? " " + convertChunk(rem) : "");
-  }
-
-  const thousands = Math.floor(num / 1000);
-  const remainder = num % 1000;
-  let result = "";
-  if (thousands > 0) {
-    result += convertChunk(thousands) + " thousand";
-  }
-  if (remainder > 0) {
-    result += (result ? " " : "") + convertChunk(remainder);
-  }
-  return result;
-}
-
-/**
- * Validate that all required lease agreement fields are present.
- * Returns an array of missing-field errors (empty if ready to generate).
- */
-export function validateLeaseAgreementFields(ctx: LeaseAgreementContext): LeaseAgreementValidationError[] {
-  const errors: LeaseAgreementValidationError[] = [];
-  if (!ctx.lease.buildingNumber?.trim()) {
-    errors.push({ field: "bldg_no", message: "Building number is missing" });
-  }
-  if (!ctx.unit?.unitNumber) {
-    errors.push({ field: "type_of_rented_property", message: "Unit/flat number is missing" });
-  }
-  if (!ctx.lease.road?.trim()) {
-    errors.push({ field: "road", message: "Road is missing" });
-  }
-  if (!ctx.lease.block?.trim()) {
-    errors.push({ field: "block", message: "Block is missing" });
-  }
-  if (!ctx.tenant?.name) {
-    errors.push({ field: "leaseholder", message: "Tenant/leaseholder name is missing" });
-  }
-  if (ctx.lease.monthlyRent == null || ctx.lease.monthlyRent <= 0) {
-    errors.push({ field: "sum_of_rent", message: "Monthly rent is missing or invalid" });
-  }
-  if (!ctx.lease.startDate) {
-    errors.push({ field: "lease_start_date", message: "Lease start date is missing" });
-  }
-  if (!ctx.lease.endDate) {
-    errors.push({ field: "lease_end_date", message: "Lease end date is missing" });
-  }
-  return errors;
-}
-
-/** Format a date as "MMMM dd, yyyy" (e.g. "April 01, 2020") to match the template. */
 function formatAgreementDate(iso: string): string {
   if (!iso) return "—";
   const d = new Date(iso);
@@ -147,10 +80,73 @@ function formatAgreementDate(iso: string): string {
   });
 }
 
-/** Format rent as "BD. 125.000 per month / BD. one hundred twenty five per month". */
+/**
+ * Format monthly rent as "BD 120.000 per month".
+ */
 function formatAgreementRent(amount: number): string {
-  const words = numberToWords(Math.floor(amount));
-  return `BD. ${amount.toFixed(3)} per month / BD. ${words} per month`;
+  return `BD ${amount.toFixed(3)} per month`;
+}
+
+/**
+ * Calculate the lease period in months/years between two dates.
+ * Examples: "1 month", "2 months", "1 year", "1 year 2 months".
+ */
+function formatLeasePeriod(startIso: string, endIso: string): string {
+  const start = new Date(startIso);
+  const end = new Date(endIso);
+
+  let months = (end.getFullYear() - start.getFullYear()) * 12 + (end.getMonth() - start.getMonth());
+  const dayDiff = end.getDate() - start.getDate();
+  if (dayDiff < 0) {
+    months -= 1;
+  }
+
+  if (months < 0) months = 0;
+
+  const years = Math.floor(months / 12);
+  const remainingMonths = months % 12;
+
+  const yearText = years === 0 ? "" : years === 1 ? "1 year" : `${years} years`;
+  const monthText = remainingMonths === 0 ? "" : remainingMonths === 1 ? "1 month" : `${remainingMonths} months`;
+
+  if (yearText && monthText) return `${yearText} ${monthText}`;
+  return yearText || monthText || "1 month";
+}
+
+/**
+ * Validate that all required lease agreement fields are present.
+ * Returns an array of missing-field errors (empty if ready to generate).
+ */
+export function validateLeaseAgreementFields(ctx: LeaseAgreementContext): LeaseAgreementValidationError[] {
+  const errors: LeaseAgreementValidationError[] = [];
+  if (!ctx.tenant?.name) {
+    errors.push({ field: "leaseholder", message: "Tenant/leaseholder name is missing" });
+  }
+  if (!ctx.unit?.unitNumber) {
+    errors.push({ field: "type_of_rented_property", message: "Unit/flat number is missing" });
+  }
+  if (!ctx.lease.buildingNumber?.trim()) {
+    errors.push({ field: "bldg_no", message: "Building number is missing" });
+  }
+  if (!ctx.lease.road?.trim()) {
+    errors.push({ field: "road", message: "Road number is missing" });
+  }
+  if (!ctx.lease.block?.trim()) {
+    errors.push({ field: "block", message: "Block number is missing" });
+  }
+  if (!ctx.lease.location?.trim()) {
+    errors.push({ field: "location", message: "Location is missing" });
+  }
+  if (ctx.lease.monthlyRent == null || ctx.lease.monthlyRent <= 0) {
+    errors.push({ field: "sum_of_rent", message: "Monthly rent is missing or invalid" });
+  }
+  if (!ctx.lease.startDate) {
+    errors.push({ field: "lease_period_from", message: "Lease start date is missing" });
+  }
+  if (!ctx.lease.endDate) {
+    errors.push({ field: "lease_period_to", message: "Lease end date is missing" });
+  }
+  return errors;
 }
 
 /** Load the master template image as a base64 data URL. */
@@ -194,15 +190,16 @@ export async function generateLeaseAgreementPdf(ctx: LeaseAgreementContext): Pro
 
   doc.addImage(templateBase64, "PNG", 0, imgY, imgWidth, imgHeight);
 
-  // Variable values to overlay.
+  // Fixed variable values to overlay in the English section only.
   const values: Record<keyof typeof OVERLAYS, string> = {
     owner: OWNER_NAME,
     leaseholder: tenant.name,
     type_of_rented_property: unit.unitNumber,
-    location: LOCATION_NAME,
+    location: lease.location ?? "",
     bldg_no: lease.buildingNumber ?? "",
     road: lease.road ?? "",
     block: lease.block ?? "",
+    lease_period: formatLeasePeriod(lease.startDate, lease.endDate),
     lease_period_from: formatAgreementDate(lease.startDate),
     lease_period_to: formatAgreementDate(lease.endDate),
     sum_of_rent: formatAgreementRent(lease.monthlyRent),

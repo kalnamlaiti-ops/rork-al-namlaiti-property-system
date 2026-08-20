@@ -169,6 +169,8 @@ export interface Lease {
   road?: string;
   /** Block number for the lease agreement. */
   block?: string;
+  /** Location for the lease agreement (e.g. Manama). */
+  location?: string;
   /** ID of the latest generated lease agreement for this lease. */
   agreementId?: string;
 }

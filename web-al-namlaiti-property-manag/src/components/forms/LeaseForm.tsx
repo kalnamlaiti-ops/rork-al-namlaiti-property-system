@@ -25,6 +25,7 @@ export default function LeaseForm({ initialData, onClose }: LeaseFormProps) {
     buildingNumber: initialData?.buildingNumber ?? "",
     road: initialData?.road ?? "",
     block: initialData?.block ?? "",
+    location: initialData?.location ?? "",
     startDate: initialData?.startDate ?? new Date().toISOString().split("T")[0],
     endDate: initialData?.endDate ?? new Date().toISOString().split("T")[0],
     monthlyRent: initialData?.monthlyRent ?? 0,
@@ -136,6 +137,10 @@ export default function LeaseForm({ initialData, onClose }: LeaseFormProps) {
           <div className="space-y-2">
             <Label htmlFor="block">Block</Label>
             <Input id="block" value={form.block} onChange={(e) => update("block", e.target.value)} placeholder="e.g. 321" />
+          </div>
+          <div className="space-y-2">
+            <Label htmlFor="location">Location</Label>
+            <Input id="location" value={form.location} onChange={(e) => update("location", e.target.value)} placeholder="e.g. Manama" />
           </div>
           <div className="space-y-2">
             <Label htmlFor="status">Status</Label>

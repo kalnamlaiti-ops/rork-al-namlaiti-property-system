@@ -738,7 +738,7 @@ export const [DataProvider, useData] = createContextHook(() => {
       sendUpdate("leases", id, updates as unknown as Record<string, unknown>);
       // ── Lease agreement: if key fields changed, mark as Needs Regeneration ──
       if (updatedLease) {
-        const relevantFields: (keyof Lease)[] = ["tenantId", "unitId", "monthlyRent", "startDate", "endDate", "road", "block", "buildingNumber"];
+        const relevantFields: (keyof Lease)[] = ["tenantId", "unitId", "monthlyRent", "startDate", "endDate", "road", "block", "buildingNumber", "location"];
         const changedRelevant = relevantFields.some((f) => changes.some((c) => c.field === f));
         if (changedRelevant) {
           const existingAgreement = data.leaseAgreements.find((a) => a.leaseId === id);

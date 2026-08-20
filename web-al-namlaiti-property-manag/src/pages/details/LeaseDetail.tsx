@@ -75,6 +75,7 @@ export default function LeaseDetail() {
               <div><p className="text-sm text-muted-foreground">Building Number</p><p className="font-medium">{lease.buildingNumber || "—"}</p></div>
               <div><p className="text-sm text-muted-foreground">Road</p><p className="font-medium">{lease.road || "—"}</p></div>
               <div><p className="text-sm text-muted-foreground">Block</p><p className="font-medium">{lease.block || "—"}</p></div>
+              <div><p className="text-sm text-muted-foreground">Location</p><p className="font-medium">{lease.location || "—"}</p></div>
               <div><p className="text-sm text-muted-foreground">Payment Frequency</p><p className="font-medium">{lease.paymentFrequency}</p></div>
               <div><p className="text-sm text-muted-foreground">Contract Days</p><p className="font-medium">{lease.contractDays}</p></div>
             </div>
