@@ -23,7 +23,6 @@ export default function InvoiceForm({ initialData, onClose }: InvoiceFormProps) 
     dueDate: initialData?.dueDate ?? new Date().toISOString().split("T")[0],
     periodFrom: new Date().toISOString().split("T")[0],
     periodTo: new Date().toISOString().split("T")[0],
-    taxRate: 5,
     notes: initialData?.notes ?? "",
     lineItems: initialData?.lineItems ?? [{ id: "li-new", description: "Rent", amount: 0, type: "Rent" as InvoiceLineItem["type"] }],
   });
@@ -35,8 +34,7 @@ export default function InvoiceForm({ initialData, onClose }: InvoiceFormProps) 
   const unit = selectedLease ? getUnitById(selectedLease.unitId) : undefined;
 
   const subtotal = form.lineItems.reduce((sum, li) => sum + (Number(li.amount) || 0), 0);
-  const taxAmount = subtotal * (Number(form.taxRate) || 0) / 100;
-  const total = subtotal + taxAmount;
+  const total = subtotal;
 
   const update = (field: keyof typeof form, value: string | number | InvoiceLineItem[]) => {
     setForm((prev) => ({ ...prev, [field]: value }));
@@ -148,10 +146,6 @@ export default function InvoiceForm({ initialData, onClose }: InvoiceFormProps) 
             <Label htmlFor="periodTo">Period To</Label>
             <Input id="periodTo" type="date" value={form.periodTo} onChange={(e) => update("periodTo", e.target.value)} />
           </div>
-          <div className="space-y-2">
-            <Label htmlFor="taxRate">Tax Rate (%)</Label>
-            <Input id="taxRate" type="number" value={form.taxRate} onChange={(e) => update("taxRate", e.target.value)} />
-          </div>
           <div className="space-y-2 md:col-span-2">
             <Label htmlFor="notes">Notes</Label>
             <Textarea id="notes" value={form.notes} onChange={(e) => update("notes", e.target.value)} />
@@ -199,7 +193,6 @@ export default function InvoiceForm({ initialData, onClose }: InvoiceFormProps) 
         {errors.lineItems && <p className="text-xs text-red-500">{errors.lineItems}</p>}
         <div className="mt-4 space-y-1 text-right text-sm">
           <p>Subtotal: BHD {subtotal.toFixed(2)}</p>
-          <p>Tax ({form.taxRate}%): BHD {taxAmount.toFixed(2)}</p>
           <p className="font-semibold">Total: BHD {total.toFixed(2)}</p>
         </div>
       </div>
