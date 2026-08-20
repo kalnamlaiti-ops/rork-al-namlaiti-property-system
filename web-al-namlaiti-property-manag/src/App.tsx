@@ -44,6 +44,7 @@ import Reports from "./pages/Reports";
 import Users from "./pages/Users";
 import HistoryPage from "./pages/History";
 import WhatsAppSettings from "./pages/WhatsAppSettings";
+import LeaseTemplateCalibration from "./pages/LeaseTemplateCalibration";
 import NotFound from "./pages/NotFound";
 
 const queryClient = new QueryClient();
@@ -93,6 +94,7 @@ const App = () => (
                 <Route path="reports" element={<Reports />} />
                 <Route path="users" element={<Users />} />
                 <Route path="whatsapp" element={<WhatsAppSettings />} />
+                <Route path="lease-template-calibration" element={<LeaseTemplateCalibration />} />
                 <Route path="history" element={<HistoryPage />} />
               </Route>
               <Route path="*" element={<NotFound />} />

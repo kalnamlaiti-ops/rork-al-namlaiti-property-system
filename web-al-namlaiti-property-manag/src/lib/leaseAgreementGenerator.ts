@@ -1,12 +1,14 @@
 // src/lib/leaseAgreementGenerator.ts
-// Automatic lease agreement PDF generator.
-// Uses the approved master template (public/lease-agreement-template.png) as the
-// page background and overlays only the English variable fields with the lease data.
-// All Arabic content, agreement conditions, signatures, and the King of Bahrain image
-// remain exactly as in the master template.
+// Fixed-position lease agreement PDF generator.
+// The master template (public/lease-agreement-template.png) is the locked background.
+// Every English variable field is rendered at its own calibrated X/Y coordinate
+// stored in the shared workspace. Field positions are calibrated once on the
+// "Lease Template Calibration" page and reused for every future lease agreement.
+// Arabic content, legal conditions, signatures, witness labels, and the King of
+// Bahrain image remain untouched.
 
 import { jsPDF } from "jspdf";
-import type { Building, Lease, Tenant, Unit } from "@/types";
+import type { Building, Lease, LeaseTemplateField, LeaseTemplateFieldKey, Tenant, Unit } from "@/types";
 
 export interface LeaseAgreementContext {
   lease: Lease;
@@ -16,25 +18,24 @@ export interface LeaseAgreementContext {
   generatedBy?: string;
 }
 
-export type LeaseAgreementField =
-  | "owner"
-  | "leaseholder"
-  | "type_of_rented_property"
-  | "location"
-  | "bldg_no"
-  | "road"
-  | "block"
-  | "lease_period"
-  | "lease_period_from"
-  | "lease_period_to"
-  | "sum_of_rent";
+export interface LeaseTemplateFieldConfig {
+  fieldKey: LeaseTemplateFieldKey;
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  fontSize: number;
+  fontFamily: string;
+  textAlign: "left" | "center" | "right";
+}
 
 export interface LeaseAgreementValidationError {
-  field: LeaseAgreementField;
+  field: LeaseTemplateFieldKey;
   message: string;
 }
 
-const TEMPLATE_VERSION = "2.1";
+const TEMPLATE_VERSION = "3.0";
+const TEMPLATE_ID = "default-template";
 const TEMPLATE_PATH = "/lease-agreement-template.png";
 
 const OWNER_NAME = "Husain Namlaiti";
@@ -43,32 +44,120 @@ const OWNER_NAME = "Husain Namlaiti";
 const PAGE_WIDTH = 595.28;
 const PAGE_HEIGHT = 841.89;
 
-// The template is 1132x1600 px. When scaled to fit page width it fills A4 exactly,
-// so pixel coordinates are converted to PDF points by multiplying by 595.28/1132.
-// All coordinates below are fixed and tuned for the English labels in the master template.
-const OVERLAYS = {
-  owner: { x: 68, y: 176, maxWidth: 380, size: 10, lineHeight: 12, patchWidth: 390 },
-  leaseholder: { x: 97, y: 195, maxWidth: 360, size: 10, lineHeight: 12, patchWidth: 370 },
-  type_of_rented_property: { x: 155, y: 213, maxWidth: 120, size: 10, lineHeight: 12, patchWidth: 125 },
-  location: { x: 329, y: 213, maxWidth: 120, size: 10, lineHeight: 12, patchWidth: 125 },
-  bldg_no: { x: 92, y: 231, maxWidth: 75, size: 10, lineHeight: 12, patchWidth: 80 },
-  road: { x: 192, y: 231, maxWidth: 85, size: 10, lineHeight: 12, patchWidth: 90 },
-  block: { x: 303, y: 231, maxWidth: 85, size: 10, lineHeight: 12, patchWidth: 90 },
-  lease_period: { x: 103, y: 250, maxWidth: 300, size: 10, lineHeight: 12, patchWidth: 310 },
-  lease_period_from: { x: 71, y: 268, maxWidth: 140, size: 10, lineHeight: 12, patchWidth: 145 },
-  lease_period_to: { x: 229, y: 268, maxWidth: 140, size: 10, lineHeight: 12, patchWidth: 145 },
-  sum_of_rent: { x: 108, y: 287, maxWidth: 380, size: 9, lineHeight: 12, patchWidth: 390 },
-} as const;
+// Default calibrated positions for the 1132x1600 px template.
+// Coordinates are in PDF points (A4 width = 595.28 pt). Converted from pixel
+// positions using scale 595.28/1132 ≈ 0.526 pt/px. These defaults are used until
+// an admin overrides them on the Lease Template Calibration page.
+export const DEFAULT_FIELD_CONFIGS: Record<LeaseTemplateFieldKey, Omit<LeaseTemplateFieldConfig, "fieldKey">> = {
+  owner_name: { x: 68, y: 176, width: 380, height: 16, fontSize: 10, fontFamily: "times", textAlign: "left" },
+  tenant_name: { x: 97, y: 195, width: 360, height: 16, fontSize: 10, fontFamily: "times", textAlign: "left" },
+  flat_number: { x: 155, y: 213, width: 120, height: 16, fontSize: 10, fontFamily: "times", textAlign: "left" },
+  location: { x: 329, y: 213, width: 120, height: 16, fontSize: 10, fontFamily: "times", textAlign: "left" },
+  building_number: { x: 92, y: 231, width: 75, height: 16, fontSize: 10, fontFamily: "times", textAlign: "left" },
+  road_number: { x: 192, y: 231, width: 85, height: 16, fontSize: 10, fontFamily: "times", textAlign: "left" },
+  block_number: { x: 303, y: 231, width: 85, height: 16, fontSize: 10, fontFamily: "times", textAlign: "left" },
+  lease_period: { x: 103, y: 250, width: 300, height: 16, fontSize: 10, fontFamily: "times", textAlign: "left" },
+  start_date: { x: 71, y: 268, width: 140, height: 16, fontSize: 10, fontFamily: "times", textAlign: "left" },
+  end_date: { x: 229, y: 268, width: 140, height: 16, fontSize: 10, fontFamily: "times", textAlign: "left" },
+  rent_amount: { x: 108, y: 287, width: 380, height: 16, fontSize: 9, fontFamily: "times", textAlign: "left" },
+};
 
-// White patch under each placeholder so the new text replaces the original value.
-const WHITE_PATCH_HEIGHT = 16;
+export const ALL_FIELD_KEYS: LeaseTemplateFieldKey[] = [
+  "owner_name",
+  "tenant_name",
+  "flat_number",
+  "building_number",
+  "road_number",
+  "block_number",
+  "location",
+  "lease_period",
+  "start_date",
+  "end_date",
+  "rent_amount",
+];
+
+export const FIELD_LABELS: Record<LeaseTemplateFieldKey, string> = {
+  owner_name: "Owner",
+  tenant_name: "Leaseholder",
+  flat_number: "Type of rented Property",
+  building_number: "Bldg No.",
+  road_number: "Road",
+  block_number: "Block",
+  location: "Location",
+  lease_period: "Lease Period",
+  start_date: "From",
+  end_date: "To",
+  rent_amount: "Sum of Rent",
+};
+
+/** Build a config lookup from stored LeaseTemplateField records. */
+export function buildFieldConfigMap(fields: LeaseTemplateField[]): Record<LeaseTemplateFieldKey, LeaseTemplateFieldConfig> {
+  const map: Partial<Record<LeaseTemplateFieldKey, LeaseTemplateFieldConfig>> = {};
+  for (const key of ALL_FIELD_KEYS) {
+    const stored = fields.find((f) => f.templateId === TEMPLATE_ID && f.fieldKey === key && f.isActive);
+    if (stored) {
+      map[key] = {
+        fieldKey: key,
+        x: stored.x,
+        y: stored.y,
+        width: stored.width,
+        height: stored.height,
+        fontSize: stored.fontSize,
+        fontFamily: stored.fontFamily,
+        textAlign: stored.textAlign,
+      };
+    } else {
+      map[key] = { fieldKey: key, ...DEFAULT_FIELD_CONFIGS[key] };
+    }
+  }
+  return map as Record<LeaseTemplateFieldKey, LeaseTemplateFieldConfig>;
+}
 
 export function getLeaseAgreementTemplateVersion(): string {
   return TEMPLATE_VERSION;
 }
 
+export function getLeaseTemplateId(): string {
+  return TEMPLATE_ID;
+}
+
 /**
- * Format a date as "dd MMMM yyyy" (e.g. "20 July 2026") to match the template.
+ * Convert a number to English words (up to 999,999).
+ */
+export function numberToWords(num: number): string {
+  if (num === 0) return "zero";
+  if (num < 0) return "negative " + numberToWords(-num);
+
+  const ones = ["", "one", "two", "three", "four", "five", "six", "seven", "eight", "nine"];
+  const teens = ["ten", "eleven", "twelve", "thirteen", "fourteen", "fifteen", "sixteen", "seventeen", "eighteen", "nineteen"];
+  const tens = ["", "", "twenty", "thirty", "forty", "fifty", "sixty", "seventy", "eighty", "ninety"];
+
+  function convertChunk(n: number): string {
+    if (n === 0) return "";
+    if (n < 10) return ones[n];
+    if (n < 20) return teens[n - 10];
+    if (n < 100) {
+      const rem = n % 10;
+      return tens[Math.floor(n / 10)] + (rem ? " " + ones[rem] : "");
+    }
+    const rem = n % 100;
+    return ones[Math.floor(n / 100)] + " hundred" + (rem ? " " + convertChunk(rem) : "");
+  }
+
+  const thousands = Math.floor(num / 1000);
+  const remainder = num % 1000;
+  let result = "";
+  if (thousands > 0) {
+    result += convertChunk(thousands) + " thousand";
+  }
+  if (remainder > 0) {
+    result += (result ? " " : "") + convertChunk(remainder);
+  }
+  return result;
+}
+
+/**
+ * Format a date as "dd MMMM yyyy" (e.g. "20 July 2026").
  */
 function formatAgreementDate(iso: string): string {
   if (!iso) return "—";
@@ -88,8 +177,8 @@ function formatAgreementRent(amount: number): string {
 }
 
 /**
- * Calculate the lease period in months/years between two dates.
- * Examples: "1 month", "2 months", "1 year", "1 year 2 months".
+ * Calculate the lease period between two dates.
+ * Examples: "1 Month", "2 Months", "1 Year", "1 Year 2 Months".
  */
 function formatLeasePeriod(startIso: string, endIso: string): string {
   const start = new Date(startIso);
@@ -100,51 +189,49 @@ function formatLeasePeriod(startIso: string, endIso: string): string {
   if (dayDiff < 0) {
     months -= 1;
   }
-
   if (months < 0) months = 0;
 
   const years = Math.floor(months / 12);
   const remainingMonths = months % 12;
 
-  const yearText = years === 0 ? "" : years === 1 ? "1 year" : `${years} years`;
-  const monthText = remainingMonths === 0 ? "" : remainingMonths === 1 ? "1 month" : `${remainingMonths} months`;
+  const yearText = years === 0 ? "" : years === 1 ? "1 Year" : `${years} Years`;
+  const monthText = remainingMonths === 0 ? "" : remainingMonths === 1 ? "1 Month" : `${remainingMonths} Months`;
 
   if (yearText && monthText) return `${yearText} ${monthText}`;
-  return yearText || monthText || "1 month";
+  return yearText || monthText || "1 Month";
 }
 
 /**
  * Validate that all required lease agreement fields are present.
- * Returns an array of missing-field errors (empty if ready to generate).
  */
 export function validateLeaseAgreementFields(ctx: LeaseAgreementContext): LeaseAgreementValidationError[] {
   const errors: LeaseAgreementValidationError[] = [];
   if (!ctx.tenant?.name) {
-    errors.push({ field: "leaseholder", message: "Tenant/leaseholder name is missing" });
+    errors.push({ field: "tenant_name", message: "Tenant/leaseholder name is missing" });
   }
   if (!ctx.unit?.unitNumber) {
-    errors.push({ field: "type_of_rented_property", message: "Unit/flat number is missing" });
+    errors.push({ field: "flat_number", message: "Flat/unit number is missing" });
   }
   if (!ctx.lease.buildingNumber?.trim()) {
-    errors.push({ field: "bldg_no", message: "Building number is missing" });
+    errors.push({ field: "building_number", message: "Building number is missing" });
   }
   if (!ctx.lease.road?.trim()) {
-    errors.push({ field: "road", message: "Road number is missing" });
+    errors.push({ field: "road_number", message: "Road number is missing" });
   }
   if (!ctx.lease.block?.trim()) {
-    errors.push({ field: "block", message: "Block number is missing" });
+    errors.push({ field: "block_number", message: "Block number is missing" });
   }
   if (!ctx.lease.location?.trim()) {
     errors.push({ field: "location", message: "Location is missing" });
   }
   if (ctx.lease.monthlyRent == null || ctx.lease.monthlyRent <= 0) {
-    errors.push({ field: "sum_of_rent", message: "Monthly rent is missing or invalid" });
+    errors.push({ field: "rent_amount", message: "Monthly rent is missing or invalid" });
   }
   if (!ctx.lease.startDate) {
-    errors.push({ field: "lease_period_from", message: "Lease start date is missing" });
+    errors.push({ field: "start_date", message: "Lease start date is missing" });
   }
   if (!ctx.lease.endDate) {
-    errors.push({ field: "lease_period_to", message: "Lease end date is missing" });
+    errors.push({ field: "end_date", message: "Lease end date is missing" });
   }
   return errors;
 }
@@ -168,7 +255,10 @@ async function loadTemplateImage(): Promise<string> {
  * Generate a lease agreement PDF from the master template and lease data.
  * Throws LeaseAgreementValidationError[] if required fields are missing.
  */
-export async function generateLeaseAgreementPdf(ctx: LeaseAgreementContext): Promise<jsPDF> {
+export async function generateLeaseAgreementPdf(
+  ctx: LeaseAgreementContext,
+  fieldConfigs: Record<LeaseTemplateFieldKey, LeaseTemplateFieldConfig> = buildFieldConfigMap([]),
+): Promise<jsPDF> {
   const errors = validateLeaseAgreementFields(ctx);
   if (errors.length > 0) throw errors;
 
@@ -190,51 +280,73 @@ export async function generateLeaseAgreementPdf(ctx: LeaseAgreementContext): Pro
 
   doc.addImage(templateBase64, "PNG", 0, imgY, imgWidth, imgHeight);
 
-  // Fixed variable values to overlay in the English section only.
-  const values: Record<keyof typeof OVERLAYS, string> = {
-    owner: OWNER_NAME,
-    leaseholder: tenant.name,
-    type_of_rented_property: unit.unitNumber,
+  const values: Record<LeaseTemplateFieldKey, string> = {
+    owner_name: OWNER_NAME,
+    tenant_name: tenant.name,
+    flat_number: unit.unitNumber,
+    building_number: lease.buildingNumber ?? "",
+    road_number: lease.road ?? "",
+    block_number: lease.block ?? "",
     location: lease.location ?? "",
-    bldg_no: lease.buildingNumber ?? "",
-    road: lease.road ?? "",
-    block: lease.block ?? "",
     lease_period: formatLeasePeriod(lease.startDate, lease.endDate),
-    lease_period_from: formatAgreementDate(lease.startDate),
-    lease_period_to: formatAgreementDate(lease.endDate),
-    sum_of_rent: formatAgreementRent(lease.monthlyRent),
+    start_date: formatAgreementDate(lease.startDate),
+    end_date: formatAgreementDate(lease.endDate),
+    rent_amount: formatAgreementRent(lease.monthlyRent),
   };
 
-  doc.setFont("times", "normal");
-  doc.setTextColor(0, 0, 0);
+  for (const key of ALL_FIELD_KEYS) {
+    const config = fieldConfigs[key];
+    if (!config) continue;
 
-  for (const [key, config] of Object.entries(OVERLAYS)) {
-    const text = values[key as keyof typeof OVERLAYS];
-    const { x, y, maxWidth, size, patchWidth } = config;
+    const { x, y, width, height, fontSize, fontFamily, textAlign } = config;
+    const text = values[key];
 
-    // White patch to cover the original placeholder line/area.
+    // Set font family if available; fallback to times.
+    try {
+      doc.setFont(fontFamily || "times", "normal");
+    } catch {
+      doc.setFont("times", "normal");
+    }
+    doc.setTextColor(0, 0, 0);
+    doc.setFontSize(fontSize);
+
+    // White patch to erase the original placeholder before drawing the new value.
     doc.setFillColor(255, 255, 255);
-    doc.rect(x - 2, y - size + 1, patchWidth, WHITE_PATCH_HEIGHT, "F");
+    doc.rect(x - 1, y - fontSize + 1, width + 2, height, "F");
 
-    // Overlay the new value.
-    doc.setFontSize(size);
-    doc.text(text, x, y, { maxWidth });
+    // Draw the value at the fixed coordinate.
+    const align = textAlign || "left";
+    let drawX = x;
+    if (align === "center") {
+      const textWidth = doc.getTextWidth(text);
+      drawX = x + (width - textWidth) / 2;
+    } else if (align === "right") {
+      const textWidth = doc.getTextWidth(text);
+      drawX = x + width - textWidth;
+    }
+    doc.text(text, drawX, y, { maxWidth: width });
   }
 
   return doc;
 }
 
 /** Download the generated lease agreement PDF. */
-export async function downloadLeaseAgreement(ctx: LeaseAgreementContext): Promise<void> {
-  const doc = await generateLeaseAgreementPdf(ctx);
+export async function downloadLeaseAgreement(
+  ctx: LeaseAgreementContext,
+  fieldConfigs?: Record<LeaseTemplateFieldKey, LeaseTemplateFieldConfig>,
+): Promise<void> {
+  const doc = await generateLeaseAgreementPdf(ctx, fieldConfigs);
   const filename = `${ctx.lease.contractNumber}-Lease-Agreement.pdf`;
   doc.save(filename);
 }
 
 /** Return the generated lease agreement PDF as a base64 data URL. */
-export async function getLeaseAgreementDataUrl(ctx: LeaseAgreementContext): Promise<string> {
-  const doc = await generateLeaseAgreementPdf(ctx);
+export async function getLeaseAgreementDataUrl(
+  ctx: LeaseAgreementContext,
+  fieldConfigs?: Record<LeaseTemplateFieldKey, LeaseTemplateFieldConfig>,
+): Promise<string> {
+  const doc = await generateLeaseAgreementPdf(ctx, fieldConfigs);
   return doc.output("datauristring");
 }
 
-export { TEMPLATE_VERSION };
+export { TEMPLATE_VERSION, TEMPLATE_ID };

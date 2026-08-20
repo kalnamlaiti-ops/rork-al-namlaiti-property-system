@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import createContextHook from "@nkzw/create-context-hook";
 import { toast } from "sonner";
 
@@ -19,6 +19,7 @@ import type {
   JournalEntry,
   Lease,
   LeaseAgreement,
+  LeaseTemplateField,
   MaintenanceRequest,
   Owner,
   Payment,
@@ -58,7 +59,13 @@ import {
   generateLeaseAgreementPdf,
   getLeaseAgreementTemplateVersion,
   validateLeaseAgreementFields,
+  buildFieldConfigMap,
+  getLeaseTemplateId,
+  ALL_FIELD_KEYS,
+  FIELD_LABELS,
+  DEFAULT_FIELD_CONFIGS,
   type LeaseAgreementContext,
+  type LeaseTemplateFieldConfig,
 } from "@/lib/leaseAgreementGenerator";
 
 export interface DataStore {
@@ -84,6 +91,7 @@ export interface DataStore {
   leaseAgreements: LeaseAgreement[];
   whatsappLogs: WhatsAppLog[];
   whatsappSettings: WhatsAppSettings[];
+  leaseTemplateFields: LeaseTemplateField[];
   history: HistoryEntry[];
 }
 
@@ -110,6 +118,7 @@ const EMPTY_STORE: DataStore = {
   leaseAgreements: [],
   whatsappLogs: [],
   whatsappSettings: [],
+  leaseTemplateFields: [],
   history: [],
 };
 
@@ -173,6 +182,7 @@ const ENTITY_TYPE_TO_COLLECTION: Record<string, keyof DataStore> = {
   "Lease Agreement": "leaseAgreements",
   "WhatsApp Log": "whatsappLogs",
   "WhatsApp Settings": "whatsappSettings",
+  "Lease Template Field": "leaseTemplateFields",
 };
 
 export const [DataProvider, useData] = createContextHook(() => {
@@ -182,6 +192,8 @@ export const [DataProvider, useData] = createContextHook(() => {
   // Track the most recent history entry id we sent locally, so we don't
   // double-apply history entries echoed back from the server.
   const localHistoryEchoGuard = useRef<Set<string>>(new Set());
+  // Used to seed default lease template field positions exactly once per session.
+  const leaseTemplateFieldsSeeded = useRef(false);
 
   // ─────────────────────────── Sync wiring ───────────────────────────
 
@@ -327,6 +339,37 @@ export const [DataProvider, useData] = createContextHook(() => {
     },
     [updateArray],
   );
+
+  // Seed default lease template field positions once when the shared workspace is empty.
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    if (connectionStatus !== "connected") return;
+    if (leaseTemplateFieldsSeeded.current) return;
+    if (data.leaseTemplateFields.length > 0) {
+      leaseTemplateFieldsSeeded.current = true;
+      return;
+    }
+
+    leaseTemplateFieldsSeeded.current = true;
+    const templateId = getLeaseTemplateId();
+    for (const key of ALL_FIELD_KEYS) {
+      const def = DEFAULT_FIELD_CONFIGS[key];
+      const field: LeaseTemplateField = {
+        id: generateId("ltf"),
+        templateId,
+        fieldKey: key,
+        x: def.x,
+        y: def.y,
+        width: def.width,
+        height: def.height,
+        fontSize: def.fontSize,
+        fontFamily: def.fontFamily,
+        textAlign: def.textAlign,
+        isActive: true,
+      };
+      sendAdd("leaseTemplateFields", field);
+    }
+  }, [connectionStatus, data.leaseTemplateFields, sendAdd]);
 
   // ────────────────────────────── Owners ──────────────────────────────
   const addOwner = useCallback(
@@ -604,6 +647,11 @@ export const [DataProvider, useData] = createContextHook(() => {
     [data.tenants, data.units, data.buildings],
   );
 
+  const fieldConfigs = useMemo(
+    () => buildFieldConfigMap(data.leaseTemplateFields),
+    [data.leaseTemplateFields],
+  );
+
   const persistLeaseAgreement = useCallback(
     async (lease: Lease, isRegeneration = false) => {
       const ctx = buildLeaseAgreementContext(lease);
@@ -656,7 +704,7 @@ export const [DataProvider, useData] = createContextHook(() => {
           return;
         }
 
-        const doc = await generateLeaseAgreementPdf(ctx);
+        const doc = await generateLeaseAgreementPdf(ctx, fieldConfigs);
         const fileUrl = doc.output("datauristring");
         const documentId = generateId("doc");
         const docRecord: Document = {
@@ -685,7 +733,7 @@ export const [DataProvider, useData] = createContextHook(() => {
         toast.error(`Lease agreement generation failed: ${message}`);
       }
     },
-    [buildLeaseAgreementContext, data.leaseAgreements, sendAdd, sendUpdate],
+    [buildLeaseAgreementContext, data.leaseAgreements, sendAdd, sendUpdate, fieldConfigs],
   );
 
   const regenerateLeaseAgreement = useCallback(
@@ -2798,5 +2846,9 @@ export const [DataProvider, useData] = createContextHook(() => {
     resendWhatsAppMessage,
     sendAllInvoicesWhatsApp,
     runAutomaticWhatsAppSend,
+    // Low-level mutation helpers used by admin tools like template calibration.
+    sendUpdate,
+    sendAdd,
+    sendDelete,
   };
 });

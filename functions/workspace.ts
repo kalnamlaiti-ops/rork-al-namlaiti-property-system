@@ -31,6 +31,7 @@ export interface DataStore {
   leaseAgreements: unknown[];
   whatsappLogs: unknown[];
   whatsappSettings: unknown[];
+  leaseTemplateFields: unknown[];
   history: unknown[];
 }
 
@@ -57,6 +58,7 @@ const COLLECTION_KEYS: (keyof DataStore)[] = [
   "leaseAgreements",
   "whatsappLogs",
   "whatsappSettings",
+  "leaseTemplateFields",
   "history",
 ];
 
@@ -83,6 +85,7 @@ const EMPTY_STORE: DataStore = {
   leaseAgreements: [],
   whatsappLogs: [],
   whatsappSettings: [],
+  leaseTemplateFields: [],
   history: [],
 };
 

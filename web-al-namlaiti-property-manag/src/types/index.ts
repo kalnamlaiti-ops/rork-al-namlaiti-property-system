@@ -374,6 +374,35 @@ export interface Document {
 
 export type LeaseAgreementStatus = "Not Generated" | "Generating" | "Generated" | "Failed" | "Needs Regeneration";
 
+/** The 11 editable English field keys on the lease agreement template. */
+export type LeaseTemplateFieldKey =
+  | "owner_name"
+  | "tenant_name"
+  | "flat_number"
+  | "building_number"
+  | "road_number"
+  | "block_number"
+  | "location"
+  | "lease_period"
+  | "start_date"
+  | "end_date"
+  | "rent_amount";
+
+/** A calibrated field position for the lease agreement template overlay. */
+export interface LeaseTemplateField {
+  id: string;
+  templateId: string;
+  fieldKey: LeaseTemplateFieldKey;
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  fontSize: number;
+  fontFamily: string;
+  textAlign: "left" | "center" | "right";
+  isActive: boolean;
+}
+
 /**
  * A generated lease agreement PDF. The actual PDF is generated on demand from
  * the master template + lease data, so we only store the metadata in the

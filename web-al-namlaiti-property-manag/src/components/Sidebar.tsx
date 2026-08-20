@@ -23,6 +23,7 @@ import {
   BarChart3,
   History,
   Shield,
+  Ruler,
   LogOut,
 } from "lucide-react";
 
@@ -75,6 +76,7 @@ const sidebarNav = [
     items: [
       { name: "Users", href: "/users", icon: Shield },
       { name: "WhatsApp", href: "/whatsapp", icon: MessageCircle },
+      { name: "Lease Calibration", href: "/lease-template-calibration", icon: Ruler },
       { name: "Audit History", href: "/history", icon: History },
     ],
   },
