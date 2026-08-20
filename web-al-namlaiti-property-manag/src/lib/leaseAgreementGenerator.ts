@@ -45,23 +45,23 @@ const LOCATION_NAME = "Manama";
 const PAGE_WIDTH = 595.28;
 const PAGE_HEIGHT = 841.89;
 
-// The template is 1132x1600 px. When scaled to fit page width it almost fills A4.
-// Coordinates below are in PDF points and tuned for the new bilingual template.
+// The template is 1132x1600 px. When scaled to fit page width it fills A4 exactly,
+// so pixel coordinates are converted to PDF points by multiplying by 595.28/1132.
+// All coordinates below are in PDF points and tuned for the new bilingual template.
 const OVERLAYS = {
-  owner: { x: 150, y: 171, maxWidth: 320, size: 10, lineHeight: 12 },
-  leaseholder: { x: 180, y: 189, maxWidth: 300, size: 10, lineHeight: 12 },
-  type_of_rented_property: { x: 290, y: 210, maxWidth: 160, size: 10, lineHeight: 12 },
-  location: { x: 660 * 0.526, y: 210, maxWidth: 140, size: 10, lineHeight: 12 },
-  bldg_no: { x: 160, y: 229, maxWidth: 90, size: 10, lineHeight: 12 },
-  road: { x: 350, y: 229, maxWidth: 90, size: 10, lineHeight: 12 },
-  block: { x: 560, y: 229, maxWidth: 90, size: 10, lineHeight: 12 },
-  lease_period_from: { x: 150, y: 268, maxWidth: 140, size: 10, lineHeight: 12 },
-  lease_period_to: { x: 480, y: 268, maxWidth: 140, size: 10, lineHeight: 12 },
-  sum_of_rent: { x: 210, y: 287, maxWidth: 360, size: 10, lineHeight: 12 },
+  owner: { x: 79, y: 179, maxWidth: 360, size: 10, lineHeight: 12, patchWidth: 370 },
+  leaseholder: { x: 95, y: 197, maxWidth: 340, size: 10, lineHeight: 12, patchWidth: 350 },
+  type_of_rented_property: { x: 153, y: 216, maxWidth: 120, size: 10, lineHeight: 12, patchWidth: 125 },
+  location: { x: 347, y: 216, maxWidth: 100, size: 10, lineHeight: 12, patchWidth: 105 },
+  bldg_no: { x: 84, y: 234, maxWidth: 65, size: 10, lineHeight: 12, patchWidth: 70 },
+  road: { x: 184, y: 234, maxWidth: 70, size: 10, lineHeight: 12, patchWidth: 75 },
+  block: { x: 295, y: 234, maxWidth: 75, size: 10, lineHeight: 12, patchWidth: 80 },
+  lease_period_from: { x: 79, y: 271, maxWidth: 130, size: 10, lineHeight: 12, patchWidth: 135 },
+  lease_period_to: { x: 252, y: 271, maxWidth: 115, size: 10, lineHeight: 12, patchWidth: 120 },
+  sum_of_rent: { x: 110, y: 289, maxWidth: 340, size: 9, lineHeight: 12, patchWidth: 350 },
 } as const;
 
 // White patch under each placeholder so the new text replaces the original value.
-const WHITE_PATCH_WIDTH = 170;
 const WHITE_PATCH_HEIGHT = 16;
 
 export function getLeaseAgreementTemplateVersion(): string {
@@ -213,11 +213,11 @@ export async function generateLeaseAgreementPdf(ctx: LeaseAgreementContext): Pro
 
   for (const [key, config] of Object.entries(OVERLAYS)) {
     const text = values[key as keyof typeof OVERLAYS];
-    const { x, y, maxWidth, size } = config;
+    const { x, y, maxWidth, size, patchWidth } = config;
 
     // White patch to cover the original placeholder line/area.
     doc.setFillColor(255, 255, 255);
-    doc.rect(x - 2, y - size + 1, WHITE_PATCH_WIDTH, WHITE_PATCH_HEIGHT, "F");
+    doc.rect(x - 2, y - size + 1, patchWidth, WHITE_PATCH_HEIGHT, "F");
 
     // Overlay the new value.
     doc.setFontSize(size);
