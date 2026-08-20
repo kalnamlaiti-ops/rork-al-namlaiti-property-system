@@ -72,6 +72,8 @@ export default function LeaseDetail() {
             <div className="grid gap-4 sm:grid-cols-2">
               <div><p className="text-sm text-muted-foreground">Start Date</p><p className="font-medium">{format(new Date(lease.startDate), "dd MMM yyyy")}</p></div>
               <div><p className="text-sm text-muted-foreground">End Date</p><p className="font-medium">{format(new Date(lease.endDate), "dd MMM yyyy")}</p></div>
+              <div><p className="text-sm text-muted-foreground">Road</p><p className="font-medium">{lease.road || "—"}</p></div>
+              <div><p className="text-sm text-muted-foreground">Block</p><p className="font-medium">{lease.block || "—"}</p></div>
               <div><p className="text-sm text-muted-foreground">Payment Frequency</p><p className="font-medium">{lease.paymentFrequency}</p></div>
               <div><p className="text-sm text-muted-foreground">Contract Days</p><p className="font-medium">{lease.contractDays}</p></div>
             </div>

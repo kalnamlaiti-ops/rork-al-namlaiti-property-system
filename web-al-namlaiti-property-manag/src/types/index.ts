@@ -163,6 +163,10 @@ export interface Lease {
   paymentFrequency: "Monthly" | "Quarterly" | "Yearly";
   contractDays: number;
   notes?: string;
+  /** Road/Street name for the lease agreement. */
+  road?: string;
+  /** Block number for the lease agreement. */
+  block?: string;
   /** ID of the latest generated lease agreement for this lease. */
   agreementId?: string;
 }

@@ -19,6 +19,8 @@ export interface LeaseAgreementContext {
 export type LeaseAgreementField =
   | "building"
   | "flat"
+  | "road"
+  | "block"
   | "leaseholder"
   | "total_rent"
   | "lease_start_date"
@@ -42,10 +44,12 @@ const PAGE_HEIGHT = 841.89;
 const OVERLAYS = {
   building: { x: 360, y: 182, maxWidth: 170, size: 10, lineHeight: 12 },
   flat: { x: 360, y: 216, maxWidth: 170, size: 10, lineHeight: 12 },
-  leaseholder: { x: 360, y: 250, maxWidth: 170, size: 10, lineHeight: 12 },
-  total_rent: { x: 360, y: 284, maxWidth: 170, size: 10, lineHeight: 12 },
-  lease_start_date: { x: 360, y: 318, maxWidth: 170, size: 10, lineHeight: 12 },
-  lease_end_date: { x: 360, y: 352, maxWidth: 170, size: 10, lineHeight: 12 },
+  road: { x: 360, y: 235, maxWidth: 170, size: 10, lineHeight: 12 },
+  block: { x: 360, y: 254, maxWidth: 170, size: 10, lineHeight: 12 },
+  leaseholder: { x: 360, y: 288, maxWidth: 170, size: 10, lineHeight: 12 },
+  total_rent: { x: 360, y: 322, maxWidth: 170, size: 10, lineHeight: 12 },
+  lease_start_date: { x: 360, y: 356, maxWidth: 170, size: 10, lineHeight: 12 },
+  lease_end_date: { x: 360, y: 390, maxWidth: 170, size: 10, lineHeight: 12 },
 } as const;
 
 // White patch under each placeholder so the new text replaces the original value.
@@ -67,6 +71,12 @@ export function validateLeaseAgreementFields(ctx: LeaseAgreementContext): LeaseA
   }
   if (!ctx.unit?.unitNumber) {
     errors.push({ field: "flat", message: "Unit/flat number is missing" });
+  }
+  if (!ctx.lease.road?.trim()) {
+    errors.push({ field: "road", message: "Road is missing" });
+  }
+  if (!ctx.lease.block?.trim()) {
+    errors.push({ field: "block", message: "Block is missing" });
   }
   if (!ctx.tenant?.name) {
     errors.push({ field: "leaseholder", message: "Tenant/leaseholder name is missing" });
@@ -144,6 +154,8 @@ export async function generateLeaseAgreementPdf(ctx: LeaseAgreementContext): Pro
   const values: Record<LeaseAgreementField, string> = {
     building: building.name,
     flat: unit.unitNumber,
+    road: lease.road ?? "",
+    block: lease.block ?? "",
     leaseholder: tenant.name,
     total_rent: formatAgreementRent(lease.monthlyRent),
     lease_start_date: formatAgreementDate(lease.startDate),

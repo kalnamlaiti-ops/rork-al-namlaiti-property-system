@@ -22,6 +22,8 @@ export default function LeaseForm({ initialData, onClose }: LeaseFormProps) {
     tenantId: initialData?.tenantId ?? "",
     unitId: initialData?.unitId ?? "",
     contractNumber: initialData?.contractNumber ?? generateCode("CNT", leases.length),
+    road: initialData?.road ?? "",
+    block: initialData?.block ?? "",
     startDate: initialData?.startDate ?? new Date().toISOString().split("T")[0],
     endDate: initialData?.endDate ?? new Date().toISOString().split("T")[0],
     monthlyRent: initialData?.monthlyRent ?? 0,
@@ -121,6 +123,14 @@ export default function LeaseForm({ initialData, onClose }: LeaseFormProps) {
             <Label htmlFor="contractNumber">Contract Number</Label>
             <Input id="contractNumber" value={form.contractNumber} onChange={(e) => update("contractNumber", e.target.value)} />
             {errors.contractNumber && <p className="text-xs text-red-500">{errors.contractNumber}</p>}
+          </div>
+          <div className="space-y-2">
+            <Label htmlFor="road">Road</Label>
+            <Input id="road" value={form.road} onChange={(e) => update("road", e.target.value)} placeholder="e.g. 2421" />
+          </div>
+          <div className="space-y-2">
+            <Label htmlFor="block">Block</Label>
+            <Input id="block" value={form.block} onChange={(e) => update("block", e.target.value)} placeholder="e.g. 321" />
           </div>
           <div className="space-y-2">
             <Label htmlFor="status">Status</Label>
