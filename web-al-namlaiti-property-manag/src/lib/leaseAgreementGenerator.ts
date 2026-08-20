@@ -60,6 +60,8 @@ export const DEFAULT_FIELD_CONFIGS: Record<LeaseTemplateFieldKey, Omit<LeaseTemp
   start_date: { x: 71, y: 268, width: 140, height: 16, fontSize: 10, fontFamily: "times", textAlign: "left" },
   end_date: { x: 229, y: 268, width: 140, height: 16, fontSize: 10, fontFamily: "times", textAlign: "left" },
   rent_amount: { x: 108, y: 287, width: 380, height: 16, fontSize: 9, fontFamily: "times", textAlign: "left" },
+  cpr_number: { x: 68, y: 305, width: 180, height: 16, fontSize: 10, fontFamily: "times", textAlign: "left" },
+  phone_number: { x: 300, y: 305, width: 180, height: 16, fontSize: 10, fontFamily: "times", textAlign: "left" },
 };
 
 export const ALL_FIELD_KEYS: LeaseTemplateFieldKey[] = [
@@ -74,6 +76,8 @@ export const ALL_FIELD_KEYS: LeaseTemplateFieldKey[] = [
   "start_date",
   "end_date",
   "rent_amount",
+  "cpr_number",
+  "phone_number",
 ];
 
 export const FIELD_LABELS: Record<LeaseTemplateFieldKey, string> = {
@@ -88,6 +92,8 @@ export const FIELD_LABELS: Record<LeaseTemplateFieldKey, string> = {
   start_date: "From",
   end_date: "To",
   rent_amount: "Sum of Rent",
+  cpr_number: "CPR No.",
+  phone_number: "Phone No.",
 };
 
 /** Build a config lookup from stored LeaseTemplateField records. */
@@ -233,6 +239,12 @@ export function validateLeaseAgreementFields(ctx: LeaseAgreementContext): LeaseA
   if (!ctx.lease.endDate) {
     errors.push({ field: "end_date", message: "Lease end date is missing" });
   }
+  if (!ctx.lease.cprNumber?.trim()) {
+    errors.push({ field: "cpr_number", message: "CPR number is missing" });
+  }
+  if (!ctx.lease.phoneNumber?.trim()) {
+    errors.push({ field: "phone_number", message: "Phone number is missing" });
+  }
   return errors;
 }
 
@@ -292,6 +304,8 @@ export async function generateLeaseAgreementPdf(
     start_date: formatAgreementDate(lease.startDate),
     end_date: formatAgreementDate(lease.endDate),
     rent_amount: formatAgreementRent(lease.monthlyRent),
+    cpr_number: lease.cprNumber ?? "",
+    phone_number: lease.phoneNumber ?? "",
   };
 
   for (const key of ALL_FIELD_KEYS) {

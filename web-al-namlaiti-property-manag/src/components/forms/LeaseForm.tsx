@@ -14,12 +14,14 @@ interface LeaseFormProps {
 const leaseStatuses: Lease["status"][] = ["Active", "Expired", "Terminating", "Draft"];
 const paymentFrequencies: Lease["paymentFrequency"][] = ["Monthly", "Quarterly", "Yearly"];
 
-/** Fixed property options: building number + road are always selected together. */
-const PROPERTY_OPTIONS = [
-  { key: "1440-2321", buildingNumber: "1440", road: "2321", label: "Building 1440 — Road 2321" },
-  { key: "1434-2321", buildingNumber: "1434", road: "2321", label: "Building 1434 — Road 2321" },
-  { key: "1337-2318", buildingNumber: "1337", road: "2318", label: "Building 1337 — Road 2318" },
-] as const;
+/** Building → Road auto-mapping. Road is always derived from the building. */
+const BUILDING_ROAD_MAP: Record<string, string> = {
+  "1440": "2321",
+  "1434": "2321",
+  "1337": "2318",
+};
+
+const BUILDING_OPTIONS = ["1440", "1434", "1337"] as const;
 
 /** Block and location are always fixed. */
 const FIXED_BLOCK = "323";
@@ -29,15 +31,12 @@ export default function LeaseForm({ initialData, onClose }: LeaseFormProps) {
   const { addLease, updateLease, tenants, units, leases } = useData();
   const isEdit = Boolean(initialData);
 
-  const initialProperty = PROPERTY_OPTIONS.find(
-    (p) => p.buildingNumber === initialData?.buildingNumber && p.road === initialData?.road,
-  );
-
   const [form, setForm] = useState({
     tenantId: initialData?.tenantId ?? "",
     unitId: initialData?.unitId ?? "",
     contractNumber: initialData?.contractNumber ?? generateCode("CNT", leases.length),
-    propertyKey: initialProperty?.key ?? "",
+    buildingNumber: initialData?.buildingNumber ?? "",
+    road: initialData?.road ?? "",
     startDate: initialData?.startDate ?? new Date().toISOString().split("T")[0],
     endDate: initialData?.endDate ?? new Date().toISOString().split("T")[0],
     monthlyRent: initialData?.monthlyRent ?? 0,
@@ -58,10 +57,15 @@ export default function LeaseForm({ initialData, onClose }: LeaseFormProps) {
     }
   };
 
-  const selectProperty = (key: string) => {
-    setForm((prev) => ({ ...prev, propertyKey: key }));
-    if (errors.propertyKey) {
-      setErrors((prev) => ({ ...prev, propertyKey: "" }));
+  /** Selecting a building always sets the mapped road automatically. */
+  const selectBuilding = (buildingNumber: string) => {
+    setForm((prev) => ({
+      ...prev,
+      buildingNumber,
+      road: BUILDING_ROAD_MAP[buildingNumber] ?? "",
+    }));
+    if (errors.buildingNumber) {
+      setErrors((prev) => ({ ...prev, buildingNumber: "" }));
     }
   };
 
@@ -70,7 +74,7 @@ export default function LeaseForm({ initialData, onClose }: LeaseFormProps) {
     if (!form.tenantId) next.tenantId = "Tenant is required";
     if (!form.unitId) next.unitId = "Unit is required";
     if (!form.contractNumber.trim()) next.contractNumber = "Contract number is required";
-    if (!form.propertyKey) next.propertyKey = "Property (building & road) is required";
+    if (!form.buildingNumber) next.buildingNumber = "Building is required";
     if (!form.cprNumber.trim()) next.cprNumber = "CPR number is required";
     if (!form.phoneNumber.trim()) next.phoneNumber = "Phone number is required";
     if (!form.startDate) next.startDate = "Start date is required";
@@ -88,19 +92,15 @@ export default function LeaseForm({ initialData, onClose }: LeaseFormProps) {
     const end = new Date(form.endDate).getTime();
     const contractDays = Math.max(1, Math.ceil((end - start) / (1000 * 60 * 60 * 24)));
 
-    const property = PROPERTY_OPTIONS.find((p) => p.key === form.propertyKey);
-
     const payload = {
       ...form,
-      buildingNumber: property?.buildingNumber ?? "",
-      road: property?.road ?? "",
+      road: BUILDING_ROAD_MAP[form.buildingNumber] ?? form.road,
       block: FIXED_BLOCK,
       location: FIXED_LOCATION,
       monthlyRent: Number(form.monthlyRent),
       securityDeposit: Number(form.securityDeposit),
       contractDays,
     };
-    delete (payload as { propertyKey?: string }).propertyKey;
 
     if (initialData) {
       updateLease(initialData.id, payload);
@@ -158,23 +158,27 @@ export default function LeaseForm({ initialData, onClose }: LeaseFormProps) {
             {errors.contractNumber && <p className="text-xs text-red-500">{errors.contractNumber}</p>}
           </div>
           <div className="space-y-2">
-            <Label htmlFor="propertyKey">Property (Building & Road) *</Label>
+            <Label htmlFor="buildingNumber">Building *</Label>
             <select
-              id="propertyKey"
-              value={form.propertyKey}
-              onChange={(e) => selectProperty(e.target.value)}
+              id="buildingNumber"
+              value={form.buildingNumber}
+              onChange={(e) => selectBuilding(e.target.value)}
               className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm"
             >
-              <option value="">Select property</option>
-              {PROPERTY_OPTIONS.map((p) => (
-                <option key={p.key} value={p.key}>
-                  {p.label}
+              <option value="">Select building</option>
+              {BUILDING_OPTIONS.map((b) => (
+                <option key={b} value={b}>
+                  {b}
                 </option>
               ))}
             </select>
-            {errors.propertyKey && <p className="text-xs text-red-500">{errors.propertyKey}</p>}
+            {errors.buildingNumber && <p className="text-xs text-red-500">{errors.buildingNumber}</p>}
+          </div>
+          <div className="space-y-2">
+            <Label htmlFor="road">Road (auto)</Label>
+            <Input id="road" value={BUILDING_ROAD_MAP[form.buildingNumber] ?? ""} readOnly placeholder="—" className="bg-muted" />
             <p className="text-xs text-muted-foreground">
-              Block 323, Manama is applied automatically.
+              Road is set automatically from the building. Block 323, Manama is applied automatically.
             </p>
           </div>
           <div className="space-y-2">

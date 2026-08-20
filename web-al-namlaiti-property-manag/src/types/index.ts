@@ -378,7 +378,7 @@ export interface Document {
 
 export type LeaseAgreementStatus = "Not Generated" | "Generating" | "Generated" | "Failed" | "Needs Regeneration";
 
-/** The 11 editable English field keys on the lease agreement template. */
+/** The 13 editable English field keys on the lease agreement template. */
 export type LeaseTemplateFieldKey =
   | "owner_name"
   | "tenant_name"
@@ -390,7 +390,9 @@ export type LeaseTemplateFieldKey =
   | "lease_period"
   | "start_date"
   | "end_date"
-  | "rent_amount";
+  | "rent_amount"
+  | "cpr_number"
+  | "phone_number";
 
 /** A calibrated field position for the lease agreement template overlay. */
 export interface LeaseTemplateField {
