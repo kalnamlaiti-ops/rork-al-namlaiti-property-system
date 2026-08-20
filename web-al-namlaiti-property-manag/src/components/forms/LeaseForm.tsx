@@ -14,22 +14,36 @@ interface LeaseFormProps {
 const leaseStatuses: Lease["status"][] = ["Active", "Expired", "Terminating", "Draft"];
 const paymentFrequencies: Lease["paymentFrequency"][] = ["Monthly", "Quarterly", "Yearly"];
 
+/** Fixed property options: building number + road are always selected together. */
+const PROPERTY_OPTIONS = [
+  { key: "1440-2321", buildingNumber: "1440", road: "2321", label: "Building 1440 — Road 2321" },
+  { key: "1434-2321", buildingNumber: "1434", road: "2321", label: "Building 1434 — Road 2321" },
+  { key: "1337-2318", buildingNumber: "1337", road: "2318", label: "Building 1337 — Road 2318" },
+] as const;
+
+/** Block and location are always fixed. */
+const FIXED_BLOCK = "323";
+const FIXED_LOCATION = "Manama";
+
 export default function LeaseForm({ initialData, onClose }: LeaseFormProps) {
   const { addLease, updateLease, tenants, units, leases } = useData();
   const isEdit = Boolean(initialData);
+
+  const initialProperty = PROPERTY_OPTIONS.find(
+    (p) => p.buildingNumber === initialData?.buildingNumber && p.road === initialData?.road,
+  );
 
   const [form, setForm] = useState({
     tenantId: initialData?.tenantId ?? "",
     unitId: initialData?.unitId ?? "",
     contractNumber: initialData?.contractNumber ?? generateCode("CNT", leases.length),
-    buildingNumber: initialData?.buildingNumber ?? "",
-    road: initialData?.road ?? "",
-    block: initialData?.block ?? "",
-    location: initialData?.location ?? "",
+    propertyKey: initialProperty?.key ?? "",
     startDate: initialData?.startDate ?? new Date().toISOString().split("T")[0],
     endDate: initialData?.endDate ?? new Date().toISOString().split("T")[0],
     monthlyRent: initialData?.monthlyRent ?? 0,
     securityDeposit: initialData?.securityDeposit ?? 0,
+    cprNumber: initialData?.cprNumber ?? "",
+    phoneNumber: initialData?.phoneNumber ?? "",
     status: initialData?.status ?? "Active",
     paymentFrequency: initialData?.paymentFrequency ?? "Monthly",
     notes: initialData?.notes ?? "",
@@ -44,11 +58,21 @@ export default function LeaseForm({ initialData, onClose }: LeaseFormProps) {
     }
   };
 
+  const selectProperty = (key: string) => {
+    setForm((prev) => ({ ...prev, propertyKey: key }));
+    if (errors.propertyKey) {
+      setErrors((prev) => ({ ...prev, propertyKey: "" }));
+    }
+  };
+
   const validate = () => {
     const next: Record<string, string> = {};
     if (!form.tenantId) next.tenantId = "Tenant is required";
     if (!form.unitId) next.unitId = "Unit is required";
     if (!form.contractNumber.trim()) next.contractNumber = "Contract number is required";
+    if (!form.propertyKey) next.propertyKey = "Property (building & road) is required";
+    if (!form.cprNumber.trim()) next.cprNumber = "CPR number is required";
+    if (!form.phoneNumber.trim()) next.phoneNumber = "Phone number is required";
     if (!form.startDate) next.startDate = "Start date is required";
     if (!form.endDate) next.endDate = "End date is required";
     if (new Date(form.endDate) <= new Date(form.startDate)) next.endDate = "End date must be after start date";
@@ -64,12 +88,19 @@ export default function LeaseForm({ initialData, onClose }: LeaseFormProps) {
     const end = new Date(form.endDate).getTime();
     const contractDays = Math.max(1, Math.ceil((end - start) / (1000 * 60 * 60 * 24)));
 
+    const property = PROPERTY_OPTIONS.find((p) => p.key === form.propertyKey);
+
     const payload = {
       ...form,
+      buildingNumber: property?.buildingNumber ?? "",
+      road: property?.road ?? "",
+      block: FIXED_BLOCK,
+      location: FIXED_LOCATION,
       monthlyRent: Number(form.monthlyRent),
       securityDeposit: Number(form.securityDeposit),
       contractDays,
     };
+    delete (payload as { propertyKey?: string }).propertyKey;
 
     if (initialData) {
       updateLease(initialData.id, payload);
@@ -127,20 +158,34 @@ export default function LeaseForm({ initialData, onClose }: LeaseFormProps) {
             {errors.contractNumber && <p className="text-xs text-red-500">{errors.contractNumber}</p>}
           </div>
           <div className="space-y-2">
-            <Label htmlFor="buildingNumber">Building Number</Label>
-            <Input id="buildingNumber" value={form.buildingNumber} onChange={(e) => update("buildingNumber", e.target.value)} placeholder="e.g. 1440" />
+            <Label htmlFor="propertyKey">Property (Building & Road) *</Label>
+            <select
+              id="propertyKey"
+              value={form.propertyKey}
+              onChange={(e) => selectProperty(e.target.value)}
+              className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm"
+            >
+              <option value="">Select property</option>
+              {PROPERTY_OPTIONS.map((p) => (
+                <option key={p.key} value={p.key}>
+                  {p.label}
+                </option>
+              ))}
+            </select>
+            {errors.propertyKey && <p className="text-xs text-red-500">{errors.propertyKey}</p>}
+            <p className="text-xs text-muted-foreground">
+              Block 323, Manama is applied automatically.
+            </p>
           </div>
           <div className="space-y-2">
-            <Label htmlFor="road">Road</Label>
-            <Input id="road" value={form.road} onChange={(e) => update("road", e.target.value)} placeholder="e.g. 2421" />
+            <Label htmlFor="cprNumber">CPR Number *</Label>
+            <Input id="cprNumber" value={form.cprNumber} onChange={(e) => update("cprNumber", e.target.value)} placeholder="e.g. 91234567" />
+            {errors.cprNumber && <p className="text-xs text-red-500">{errors.cprNumber}</p>}
           </div>
           <div className="space-y-2">
-            <Label htmlFor="block">Block</Label>
-            <Input id="block" value={form.block} onChange={(e) => update("block", e.target.value)} placeholder="e.g. 321" />
-          </div>
-          <div className="space-y-2">
-            <Label htmlFor="location">Location</Label>
-            <Input id="location" value={form.location} onChange={(e) => update("location", e.target.value)} placeholder="e.g. Manama" />
+            <Label htmlFor="phoneNumber">Phone Number *</Label>
+            <Input id="phoneNumber" value={form.phoneNumber} onChange={(e) => update("phoneNumber", e.target.value)} placeholder="e.g. +973 3605 1133" />
+            {errors.phoneNumber && <p className="text-xs text-red-500">{errors.phoneNumber}</p>}
           </div>
           <div className="space-y-2">
             <Label htmlFor="status">Status</Label>

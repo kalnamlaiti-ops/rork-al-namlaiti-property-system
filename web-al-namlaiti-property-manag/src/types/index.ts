@@ -171,6 +171,10 @@ export interface Lease {
   block?: string;
   /** Location for the lease agreement (e.g. Manama). */
   location?: string;
+  /** Leaseholder CPR number. */
+  cprNumber?: string;
+  /** Leaseholder phone number. */
+  phoneNumber?: string;
   /** ID of the latest generated lease agreement for this lease. */
   agreementId?: string;
 }
