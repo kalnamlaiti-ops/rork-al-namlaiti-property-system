@@ -163,6 +163,8 @@ export interface Lease {
   paymentFrequency: "Monthly" | "Quarterly" | "Yearly";
   contractDays: number;
   notes?: string;
+  /** ID of the latest generated lease agreement for this lease. */
+  agreementId?: string;
 }
 
 export interface Invoice {
@@ -360,6 +362,31 @@ export interface Document {
   entityId: string;
   uploadDate: string;
   fileUrl: string;
+}
+
+export type LeaseAgreementStatus = "Not Generated" | "Generating" | "Generated" | "Failed" | "Needs Regeneration";
+
+/**
+ * A generated lease agreement PDF. The actual PDF is generated on demand from
+ * the master template + lease data, so we only store the metadata in the
+ * shared workspace (not the full PDF bytes).
+ */
+export interface LeaseAgreement {
+  id: string;
+  leaseId: string;
+  building: string;
+  flat: string;
+  tenant: string;
+  rentAmount: number;
+  startDate: string;
+  endDate: string;
+  templateVersion: string;
+  generatedAt: string;
+  generatedBy: string;
+  status: LeaseAgreementStatus;
+  documentId?: string;
+  previousDocumentId?: string;
+  lastError?: string;
 }
 
 export type HistoryAction = "Created" | "Edited" | "Deleted";

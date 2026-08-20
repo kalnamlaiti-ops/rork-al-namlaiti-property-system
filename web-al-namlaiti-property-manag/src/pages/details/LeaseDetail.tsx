@@ -6,13 +6,13 @@ import { StatusBadge } from "@/components/StatusBadge";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
 import { useData } from "@/context/DataContext";
 import LeaseForm from "@/components/forms/LeaseForm";
-import { ArrowLeft, Pencil, FileText, Home, Calendar, User } from "lucide-react";
+import { ArrowLeft, Pencil, FileText, Home, Calendar, User, Eye, Download, RefreshCw, AlertCircle } from "lucide-react";
 import { format } from "date-fns";
 
 export default function LeaseDetail() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
-  const { leases, tenants, units, buildings, invoices, payments, getLeaseById, getTenantById, getUnitById, getBuildingById } = useData();
+  const { leases, tenants, units, buildings, invoices, payments, documents, getLeaseById, getTenantById, getUnitById, getBuildingById, getLeaseAgreementByLeaseId, getDocumentById, regenerateLeaseAgreement } = useData();
   const [dialogOpen, setDialogOpen] = useState(false);
 
   const lease = id ? getLeaseById(id) : undefined;
@@ -21,6 +21,8 @@ export default function LeaseDetail() {
   const building = unit ? getBuildingById(unit.buildingId) : undefined;
   const leaseInvoices = lease ? invoices.filter((i) => i.leaseId === lease.id) : [];
   const leasePayments = lease ? payments.filter((p) => p.invoiceId && leaseInvoices.some((i) => i.id === p.invoiceId)) : [];
+  const agreement = lease ? getLeaseAgreementByLeaseId(lease.id) : undefined;
+  const agreementDoc = agreement?.documentId ? getDocumentById(agreement.documentId) : undefined;
 
   if (!lease) {
     return (
@@ -98,6 +100,59 @@ export default function LeaseDetail() {
           </CardContent>
         </Card>
       </div>
+
+      <Card>
+        <CardContent className="p-6">
+          <div className="mb-4 flex items-center justify-between">
+            <h3 className="text-base font-semibold">Lease Agreement</h3>
+            <StatusBadge status={agreement?.status ?? "Not Generated"} />
+          </div>
+          {agreement ? (
+            <div className="space-y-4">
+              <div className="grid gap-4 sm:grid-cols-2">
+                <div><p className="text-sm text-muted-foreground">Generated</p><p className="font-medium">{format(new Date(agreement.generatedAt), "dd MMM yyyy HH:mm")}</p></div>
+                <div><p className="text-sm text-muted-foreground">Template Version</p><p className="font-medium">{agreement.templateVersion}</p></div>
+                {agreement.lastError && (
+                  <div className="sm:col-span-2 flex items-start gap-2 rounded-md bg-red-50 p-3 text-sm text-red-700">
+                    <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
+                    <span>{agreement.lastError}</span>
+                  </div>
+                )}
+              </div>
+              <div className="flex flex-wrap gap-3">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  disabled={agreement.status !== "Generated" || !agreementDoc?.fileUrl}
+                  onClick={() => agreementDoc?.fileUrl && window.open(agreementDoc.fileUrl, "_blank")}
+                >
+                  <Eye className="mr-2 h-4 w-4" /> View
+                </Button>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  disabled={agreement.status !== "Generated" || !agreementDoc?.fileUrl}
+                  onClick={() => {
+                    if (agreementDoc?.fileUrl) {
+                      const link = document.createElement("a");
+                      link.href = agreementDoc.fileUrl;
+                      link.download = `${lease.contractNumber}-Lease-Agreement.pdf`;
+                      link.click();
+                    }
+                  }}
+                >
+                  <Download className="mr-2 h-4 w-4" /> Download PDF
+                </Button>
+                <Button variant="outline" size="sm" onClick={() => lease && regenerateLeaseAgreement(lease)}>
+                  <RefreshCw className="mr-2 h-4 w-4" /> Regenerate
+                </Button>
+              </div>
+            </div>
+          ) : (
+            <p className="text-sm text-muted-foreground">No agreement has been generated yet.</p>
+          )}
+        </CardContent>
+      </Card>
 
       <Card>
         <CardContent className="p-6">

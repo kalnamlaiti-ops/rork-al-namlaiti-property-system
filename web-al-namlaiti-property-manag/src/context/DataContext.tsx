@@ -18,6 +18,7 @@ import type {
   Invoice,
   JournalEntry,
   Lease,
+  LeaseAgreement,
   MaintenanceRequest,
   Owner,
   Payment,
@@ -53,6 +54,12 @@ import {
 import type { PdfContext } from "@/lib/pdfGenerator";
 import { leaseCascade, invoiceCascade, paymentCascade } from "@/lib/automation";
 import { computeAllocation, validateLinkedUnits, validatePercentageRules } from "@/lib/ewaAllocation";
+import {
+  generateLeaseAgreementPdf,
+  getLeaseAgreementTemplateVersion,
+  validateLeaseAgreementFields,
+  type LeaseAgreementContext,
+} from "@/lib/leaseAgreementGenerator";
 
 export interface DataStore {
   owners: Owner[];
@@ -74,6 +81,7 @@ export interface DataStore {
   vendors: Vendor[];
   assets: Asset[];
   documents: Document[];
+  leaseAgreements: LeaseAgreement[];
   whatsappLogs: WhatsAppLog[];
   whatsappSettings: WhatsAppSettings[];
   history: HistoryEntry[];
@@ -99,6 +107,7 @@ const EMPTY_STORE: DataStore = {
   vendors: [],
   assets: [],
   documents: [],
+  leaseAgreements: [],
   whatsappLogs: [],
   whatsappSettings: [],
   history: [],
@@ -161,6 +170,7 @@ const ENTITY_TYPE_TO_COLLECTION: Record<string, keyof DataStore> = {
   Complaint: "complaints",
   "Maintenance Request": "maintenanceRequests",
   Document: "documents",
+  "Lease Agreement": "leaseAgreements",
   "WhatsApp Log": "whatsappLogs",
   "WhatsApp Settings": "whatsappSettings",
 };
@@ -583,6 +593,109 @@ export const [DataProvider, useData] = createContextHook(() => {
   );
 
   // ────────────────────────────── Leases ──────────────────────────────
+  const buildLeaseAgreementContext = useCallback(
+    (lease: Lease): LeaseAgreementContext | null => {
+      const tenant = data.tenants.find((t) => t.id === lease.tenantId);
+      const unit = data.units.find((u) => u.id === lease.unitId);
+      const building = unit ? data.buildings.find((b) => b.id === unit.buildingId) : undefined;
+      if (!tenant || !unit || !building) return null;
+      return { lease, tenant, unit, building };
+    },
+    [data.tenants, data.units, data.buildings],
+  );
+
+  const persistLeaseAgreement = useCallback(
+    async (lease: Lease, isRegeneration = false) => {
+      const ctx = buildLeaseAgreementContext(lease);
+      if (!ctx) {
+        toast.error("Could not generate lease agreement: missing tenant, unit, or building data");
+        return;
+      }
+
+      const existing = data.leaseAgreements.find((a) => a.leaseId === lease.id);
+      const agreementId = existing?.id ?? generateId("la");
+      const status: LeaseAgreement["status"] = "Generating";
+
+      const agreement: LeaseAgreement = {
+        id: agreementId,
+        leaseId: lease.id,
+        building: ctx.building.name,
+        flat: ctx.unit.unitNumber,
+        tenant: ctx.tenant.name,
+        rentAmount: ctx.lease.monthlyRent,
+        startDate: ctx.lease.startDate,
+        endDate: ctx.lease.endDate,
+        templateVersion: getLeaseAgreementTemplateVersion(),
+        generatedAt: new Date().toISOString(),
+        generatedBy: actorRef.current,
+        status,
+      };
+
+      const previousDocumentId = existing?.documentId;
+      if (existing) {
+        sendUpdate("leaseAgreements", agreementId, {
+          ...agreement,
+          previousDocumentId,
+        } as unknown as Record<string, unknown>);
+      } else {
+        sendAdd("leaseAgreements", agreement);
+      }
+
+      // Update the lease to point to the latest agreement.
+      sendUpdate("leases", lease.id, { agreementId } as unknown as Record<string, unknown>);
+
+      try {
+        const validation = validateLeaseAgreementFields(ctx);
+        if (validation.length > 0) {
+          const missing = validation.map((v) => v.message).join("; ");
+          sendUpdate("leaseAgreements", agreementId, {
+            status: "Failed",
+            lastError: missing,
+          } as unknown as Record<string, unknown>);
+          toast.error(`Lease agreement missing fields: ${missing}`);
+          return;
+        }
+
+        const doc = await generateLeaseAgreementPdf(ctx);
+        const fileUrl = doc.output("datauristring");
+        const documentId = generateId("doc");
+        const docRecord: Document = {
+          id: documentId,
+          name: `${lease.contractNumber} - Lease Agreement`,
+          type: "PDF",
+          entityType: "Lease",
+          entityId: lease.id,
+          uploadDate: agreement.generatedAt,
+          fileUrl,
+        };
+        sendAdd("documents", docRecord);
+
+        sendUpdate("leaseAgreements", agreementId, {
+          status: "Generated",
+          documentId,
+          previousDocumentId,
+          lastError: undefined,
+        } as unknown as Record<string, unknown>);
+      } catch (err) {
+        const message = err instanceof Error ? err.message : "PDF generation failed";
+        sendUpdate("leaseAgreements", agreementId, {
+          status: "Failed",
+          lastError: message,
+        } as unknown as Record<string, unknown>);
+        toast.error(`Lease agreement generation failed: ${message}`);
+      }
+    },
+    [buildLeaseAgreementContext, data.leaseAgreements, sendAdd, sendUpdate],
+  );
+
+  const regenerateLeaseAgreement = useCallback(
+    (lease: Lease) => {
+      persistLeaseAgreement(lease, true);
+      toast.info("Regenerating lease agreement...");
+    },
+    [persistLeaseAgreement],
+  );
+
   const addLease = useCallback(
     (lease: Omit<Lease, "id">) => {
       const newLease: Lease = { ...lease, id: generateId("l") };
@@ -601,10 +714,12 @@ export const [DataProvider, useData] = createContextHook(() => {
         entityName: newLease.contractNumber,
         summary: `Lease "${newLease.contractNumber}" created — unit & tenant auto-linked`,
       });
+      // ── Automatic lease agreement generation (non-blocking) ──
+      persistLeaseAgreement(newLease, false);
       toast.success(`Lease "${newLease.contractNumber}" created — unit & tenant auto-linked`);
       return newLease;
     },
-    [sendAdd, pushHistory, sendUpdate, data.units, data.tenants, data.buildings],
+    [sendAdd, pushHistory, sendUpdate, persistLeaseAgreement, data.units, data.tenants, data.buildings],
   );
 
   const updateLease = useCallback(
@@ -621,6 +736,19 @@ export const [DataProvider, useData] = createContextHook(() => {
         return prev;
       });
       sendUpdate("leases", id, updates as unknown as Record<string, unknown>);
+      // ── Lease agreement: if key fields changed, mark as Needs Regeneration ──
+      if (updatedLease) {
+        const relevantFields: (keyof Lease)[] = ["tenantId", "unitId", "monthlyRent", "startDate", "endDate"];
+        const changedRelevant = relevantFields.some((f) => changes.some((c) => c.field === f));
+        if (changedRelevant) {
+          const existingAgreement = data.leaseAgreements.find((a) => a.leaseId === id);
+          if (existingAgreement && existingAgreement.status === "Generated") {
+            sendUpdate("leaseAgreements", existingAgreement.id, {
+              status: "Needs Regeneration",
+            } as unknown as Record<string, unknown>);
+          }
+        }
+      }
       // ── Cascade: re-link unit status & tenant if lease changed ──
       if (updatedLease) {
         const cascade = leaseCascade(updatedLease, data.units, data.tenants, data.buildings);
@@ -2548,6 +2676,11 @@ export const [DataProvider, useData] = createContextHook(() => {
     [data.payments],
   );
   const getDocumentById = useCallback((id: string) => data.documents.find((d) => d.id === id), [data.documents]);
+  const getLeaseAgreementById = useCallback((id: string) => data.leaseAgreements.find((a) => a.id === id), [data.leaseAgreements]);
+  const getLeaseAgreementByLeaseId = useCallback(
+    (leaseId: string) => data.leaseAgreements.find((a) => a.leaseId === leaseId),
+    [data.leaseAgreements],
+  );
   const getEWAAccountById = useCallback((id: string) => data.ewaAccounts.find((a) => a.id === id), [data.ewaAccounts]);
   const getBuildingEWAAccounts = useCallback(
     (buildingId: string) => data.ewaAccounts.filter((a) => a.buildingId === buildingId),
@@ -2643,6 +2776,9 @@ export const [DataProvider, useData] = createContextHook(() => {
     updateDocument,
     deleteDocument,
     getDocumentById,
+    getLeaseAgreementById,
+    getLeaseAgreementByLeaseId,
+    regenerateLeaseAgreement,
     clearHistory,
     recoverEntity,
     // Automated invoicing
