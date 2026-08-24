@@ -184,7 +184,7 @@ function formatAgreementRent(amount: number): string {
 
 /**
  * Calculate the lease period between two dates.
- * Examples: "1 Month", "2 Months", "1 Year", "1 Year 2 Months".
+ * Examples: "1 Month", "2 Months", "1 years fixed agreement", "1 years fixed agreement 2 Months".
  */
 function formatLeasePeriod(startIso: string, endIso: string): string {
   const start = new Date(startIso);
@@ -200,11 +200,11 @@ function formatLeasePeriod(startIso: string, endIso: string): string {
   const years = Math.floor(months / 12);
   const remainingMonths = months % 12;
 
-  const yearText = years === 0 ? "" : years === 1 ? "1 Year" : `${years} Years`;
+  const yearText = years === 0 ? "" : years === 1 ? "1 years fixed agreement" : `${years} years fixed agreement`;
   const monthText = remainingMonths === 0 ? "" : remainingMonths === 1 ? "1 Month" : `${remainingMonths} Months`;
 
   if (yearText && monthText) return `${yearText} ${monthText}`;
-  return yearText || monthText || "1 Year";
+  return yearText || monthText || "1 years fixed agreement";
 }
 
 /**
