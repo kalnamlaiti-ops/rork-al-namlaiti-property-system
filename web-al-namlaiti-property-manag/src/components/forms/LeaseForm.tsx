@@ -22,7 +22,12 @@ const BUILDING_ROAD_MAP: Record<string, string> = {
 };
 
 // Building numbers are sourced from each building record's buildingNumber field.
-const BUILDING_OPTIONS = ["1440", "1434", "1337"] as const;
+/** Try to derive the building number from a building name (e.g. "Building 1440" -> "1440"). */
+function extractBuildingNumberFromName(name: string): string | undefined {
+  const match = name.match(/\b(1[34]\d{2}|\d{3,4})\b/);
+  return match?.[1];
+}
+
 
 /** Block and location are always fixed. */
 const FIXED_BLOCK = "323";
@@ -42,12 +47,17 @@ export default function LeaseForm({ initialData, onClose }: LeaseFormProps) {
   const initialTenant = tenants.find((t) => t.id === initialData?.tenantId);
   const initialUnit = units.find((u) => u.id === initialData?.unitId);
   const initialBuilding = buildings.find((b) => b.id === initialUnit?.buildingId);
+  const initialBuildingNumber =
+    initialBuilding?.buildingNumber ??
+    extractBuildingNumberFromName(initialBuilding?.name ?? "") ??
+    initialData?.buildingNumber ??
+    "";
 
   const [form, setForm] = useState({
     tenantId: initialData?.tenantId ?? "",
     unitId: initialData?.unitId ?? "",
     contractNumber: initialData?.contractNumber ?? generateCode("CNT", leases.length),
-    buildingNumber: initialBuilding?.buildingNumber ?? initialData?.buildingNumber ?? "",
+    buildingNumber: initialBuildingNumber,
     road: initialData?.road ?? "",
     startDate: initialData?.startDate ?? new Date().toISOString().split("T")[0],
     endDate: initialData?.endDate ?? addOneYear(new Date().toISOString().split("T")[0]),
@@ -86,7 +96,10 @@ export default function LeaseForm({ initialData, onClose }: LeaseFormProps) {
   const selectUnit = (unitId: string) => {
     const unit = units.find((u) => u.id === unitId);
     const building = buildings.find((b) => b.id === unit?.buildingId);
-    const buildingNumber = building?.buildingNumber ?? "";
+    const buildingNumber =
+      building?.buildingNumber ??
+      extractBuildingNumberFromName(building?.name ?? "") ??
+      "";
     setForm((prev) => ({
       ...prev,
       unitId,
@@ -147,6 +160,10 @@ export default function LeaseForm({ initialData, onClose }: LeaseFormProps) {
     const selectedTenant = tenants.find((t) => t.id === form.tenantId);
     const selectedUnit = units.find((u) => u.id === form.unitId);
     const selectedBuilding = buildings.find((b) => b.id === selectedUnit?.buildingId);
+    const selectedBuildingNumber =
+      selectedBuilding?.buildingNumber ??
+      extractBuildingNumberFromName(selectedBuilding?.name ?? "") ??
+      form.buildingNumber;
 
     const payload = {
       ...form,
@@ -154,8 +171,8 @@ export default function LeaseForm({ initialData, onClose }: LeaseFormProps) {
       cprNumber: selectedTenant?.crNumber ?? form.cprNumber,
       phoneNumber: selectedTenant?.phone ?? form.phoneNumber,
       // Always derive from the selected unit's building record.
-      buildingNumber: selectedBuilding?.buildingNumber ?? form.buildingNumber,
-      road: BUILDING_ROAD_MAP[selectedBuilding?.buildingNumber ?? form.buildingNumber] ?? form.road,
+      buildingNumber: selectedBuildingNumber,
+      road: BUILDING_ROAD_MAP[selectedBuildingNumber] ?? form.road,
       block: FIXED_BLOCK,
       location: FIXED_LOCATION,
       monthlyRent: Number(form.monthlyRent),
@@ -203,10 +220,15 @@ export default function LeaseForm({ initialData, onClose }: LeaseFormProps) {
             >
               <option value="">Select unit</option>
               {units.map((u) => {
-                const building = u.buildingId; // we can show building name in future via context helper
+                const building = buildings.find((b) => b.id === u.buildingId);
+                const buildingLabel =
+                  building?.buildingNumber ??
+                  extractBuildingNumberFromName(building?.name ?? "") ??
+                  building?.name ??
+                  u.buildingId;
                 return (
                   <option key={u.id} value={u.id}>
-                    {u.unitNumber} {building ? `(${building})` : ""}
+                    {u.unitNumber} {buildingLabel ? `— ${buildingLabel}` : ""}
                   </option>
                 );
               })}

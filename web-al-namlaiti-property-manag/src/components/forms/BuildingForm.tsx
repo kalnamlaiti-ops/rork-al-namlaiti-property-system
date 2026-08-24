@@ -40,8 +40,24 @@ export default function BuildingForm({ initialData, onClose }: BuildingFormProps
 
   const [errors, setErrors] = useState<Record<string, string>>({});
 
+  /** Extract a building number like 1440 from names such as "Building 1440". */
+  const extractBuildingNumberFromName = (name: string): string | undefined => {
+    const match = name.match(/\b(1[34]\d{2}|\d{3,4})\b/);
+    return match?.[1];
+  };
+
   const update = (field: keyof typeof form, value: string | number) => {
-    setForm((prev) => ({ ...prev, [field]: value }));
+    setForm((prev) => {
+      let next = { ...prev, [field]: value };
+      // Auto-fill buildingNumber from the building name when the field is empty and the name contains a number.
+      if (field === "name" && !prev.buildingNumber.trim() && typeof value === "string") {
+        const extracted = extractBuildingNumberFromName(value);
+        if (extracted) {
+          next = { ...next, buildingNumber: extracted };
+        }
+      }
+      return next;
+    });
     if (errors[field]) {
       setErrors((prev) => ({ ...prev, [field]: "" }));
     }
@@ -52,6 +68,7 @@ export default function BuildingForm({ initialData, onClose }: BuildingFormProps
     if (!form.name.trim()) next.name = "Building name is required";
     if (!form.address.trim()) next.address = "Address is required";
     if (!form.ownerId) next.ownerId = "Owner is required";
+    if (!form.buildingNumber.trim()) next.buildingNumber = "Lease building number is required (auto-filled from name if it contains a number)";
     setErrors(next);
     return Object.keys(next).length === 0;
   };
@@ -99,8 +116,10 @@ export default function BuildingForm({ initialData, onClose }: BuildingFormProps
             <Input id="code" value={form.code} onChange={(e) => update("code", e.target.value)} />
           </div>
           <div className="space-y-2">
-            <Label htmlFor="buildingNumber">Lease Building Number</Label>
+            <Label htmlFor="buildingNumber">Lease Building Number *</Label>
             <Input id="buildingNumber" value={form.buildingNumber} onChange={(e) => update("buildingNumber", e.target.value)} placeholder="e.g. 1440" />
+            {errors.buildingNumber && <p className="text-xs text-red-500">{errors.buildingNumber}</p>}
+            <p className="text-xs text-muted-foreground">Auto-filled from the building name if it contains a number (e.g. Building 1440).</p>
           </div>
           <div className="space-y-2 md:col-span-2">
             <Label htmlFor="address">Address *</Label>
