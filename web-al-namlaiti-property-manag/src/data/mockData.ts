@@ -57,6 +57,7 @@ export const buildings: Building[] = [
     units: 10,
     yearBuilt: 2019,
     description: "Premium residential tower in Juffair with studios and apartments.",
+    buildingNumber: "1440",
   },
   {
     id: "bld-2",
@@ -69,6 +70,7 @@ export const buildings: Building[] = [
     units: 10,
     yearBuilt: 2017,
     description: "Commercial and residential mixed-use tower in Seef.",
+    buildingNumber: "1434",
   },
   {
     id: "bld-3",
@@ -81,6 +83,7 @@ export const buildings: Building[] = [
     units: 8,
     yearBuilt: 2021,
     description: "Modern residential complex in Riffa.",
+    buildingNumber: "1337",
   },
 ];
 

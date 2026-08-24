@@ -116,6 +116,8 @@ export interface Building {
   insuranceProvider?: string;
   insurancePolicyNumber?: string;
   insuranceExpiryDate?: string;
+  /** Building number used on lease agreements (e.g. 1440). */
+  buildingNumber?: string;
 }
 
 export interface Unit {

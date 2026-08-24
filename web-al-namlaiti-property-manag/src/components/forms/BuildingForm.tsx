@@ -35,6 +35,7 @@ export default function BuildingForm({ initialData, onClose }: BuildingFormProps
     insuranceProvider: initialData?.insuranceProvider ?? "",
     insurancePolicyNumber: initialData?.insurancePolicyNumber ?? "",
     insuranceExpiryDate: initialData?.insuranceExpiryDate ?? "",
+    buildingNumber: initialData?.buildingNumber ?? "",
   });
 
   const [errors, setErrors] = useState<Record<string, string>>({});
@@ -72,6 +73,7 @@ export default function BuildingForm({ initialData, onClose }: BuildingFormProps
       insuranceProvider: form.insuranceProvider || undefined,
       insurancePolicyNumber: form.insurancePolicyNumber || undefined,
       insuranceExpiryDate: form.insuranceExpiryDate || undefined,
+      buildingNumber: form.buildingNumber || undefined,
     };
 
     if (initialData) {
@@ -95,6 +97,10 @@ export default function BuildingForm({ initialData, onClose }: BuildingFormProps
           <div className="space-y-2">
             <Label htmlFor="code">Building Code</Label>
             <Input id="code" value={form.code} onChange={(e) => update("code", e.target.value)} />
+          </div>
+          <div className="space-y-2">
+            <Label htmlFor="buildingNumber">Lease Building Number</Label>
+            <Input id="buildingNumber" value={form.buildingNumber} onChange={(e) => update("buildingNumber", e.target.value)} placeholder="e.g. 1440" />
           </div>
           <div className="space-y-2 md:col-span-2">
             <Label htmlFor="address">Address *</Label>

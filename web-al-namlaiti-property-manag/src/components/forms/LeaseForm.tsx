@@ -21,6 +21,7 @@ const BUILDING_ROAD_MAP: Record<string, string> = {
   "1337": "2318",
 };
 
+// Building numbers are sourced from each building record's buildingNumber field.
 const BUILDING_OPTIONS = ["1440", "1434", "1337"] as const;
 
 /** Block and location are always fixed. */
@@ -36,15 +37,17 @@ function addOneYear(dateStr: string): string {
 }
 
 export default function LeaseForm({ initialData, onClose }: LeaseFormProps) {
-  const { addLease, updateLease, tenants, units, leases } = useData();
+  const { addLease, updateLease, tenants, units, leases, buildings } = useData();
   const isEdit = Boolean(initialData);
   const initialTenant = tenants.find((t) => t.id === initialData?.tenantId);
+  const initialUnit = units.find((u) => u.id === initialData?.unitId);
+  const initialBuilding = buildings.find((b) => b.id === initialUnit?.buildingId);
 
   const [form, setForm] = useState({
     tenantId: initialData?.tenantId ?? "",
     unitId: initialData?.unitId ?? "",
     contractNumber: initialData?.contractNumber ?? generateCode("CNT", leases.length),
-    buildingNumber: initialData?.buildingNumber ?? "",
+    buildingNumber: initialBuilding?.buildingNumber ?? initialData?.buildingNumber ?? "",
     road: initialData?.road ?? "",
     startDate: initialData?.startDate ?? new Date().toISOString().split("T")[0],
     endDate: initialData?.endDate ?? addOneYear(new Date().toISOString().split("T")[0]),
@@ -74,6 +77,25 @@ export default function LeaseForm({ initialData, onClose }: LeaseFormProps) {
       buildingNumber,
       road: BUILDING_ROAD_MAP[buildingNumber] ?? "",
     }));
+    if (errors.buildingNumber) {
+      setErrors((prev) => ({ ...prev, buildingNumber: "" }));
+    }
+  };
+
+  /** Selecting a unit pulls the building number from the unit's building record. */
+  const selectUnit = (unitId: string) => {
+    const unit = units.find((u) => u.id === unitId);
+    const building = buildings.find((b) => b.id === unit?.buildingId);
+    const buildingNumber = building?.buildingNumber ?? "";
+    setForm((prev) => ({
+      ...prev,
+      unitId,
+      buildingNumber,
+      road: BUILDING_ROAD_MAP[buildingNumber] ?? "",
+    }));
+    if (errors.unitId) {
+      setErrors((prev) => ({ ...prev, unitId: "" }));
+    }
     if (errors.buildingNumber) {
       setErrors((prev) => ({ ...prev, buildingNumber: "" }));
     }
@@ -123,13 +145,17 @@ export default function LeaseForm({ initialData, onClose }: LeaseFormProps) {
     const contractDays = Math.max(1, Math.ceil((end - start) / (1000 * 60 * 60 * 24)));
 
     const selectedTenant = tenants.find((t) => t.id === form.tenantId);
+    const selectedUnit = units.find((u) => u.id === form.unitId);
+    const selectedBuilding = buildings.find((b) => b.id === selectedUnit?.buildingId);
 
     const payload = {
       ...form,
       // Always derive from the selected tenant record to keep the tenant as the single source of truth.
       cprNumber: selectedTenant?.crNumber ?? form.cprNumber,
       phoneNumber: selectedTenant?.phone ?? form.phoneNumber,
-      road: BUILDING_ROAD_MAP[form.buildingNumber] ?? form.road,
+      // Always derive from the selected unit's building record.
+      buildingNumber: selectedBuilding?.buildingNumber ?? form.buildingNumber,
+      road: BUILDING_ROAD_MAP[selectedBuilding?.buildingNumber ?? form.buildingNumber] ?? form.road,
       block: FIXED_BLOCK,
       location: FIXED_LOCATION,
       monthlyRent: Number(form.monthlyRent),
@@ -172,7 +198,7 @@ export default function LeaseForm({ initialData, onClose }: LeaseFormProps) {
             <select
               id="unitId"
               value={form.unitId}
-              onChange={(e) => update("unitId", e.target.value)}
+              onChange={(e) => selectUnit(e.target.value)}
               className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm"
             >
               <option value="">Select unit</option>
@@ -194,20 +220,9 @@ export default function LeaseForm({ initialData, onClose }: LeaseFormProps) {
           </div>
           <div className="space-y-2">
             <Label htmlFor="buildingNumber">Building *</Label>
-            <select
-              id="buildingNumber"
-              value={form.buildingNumber}
-              onChange={(e) => selectBuilding(e.target.value)}
-              className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm"
-            >
-              <option value="">Select building</option>
-              {BUILDING_OPTIONS.map((b) => (
-                <option key={b} value={b}>
-                  {b}
-                </option>
-              ))}
-            </select>
+            <Input id="buildingNumber" value={form.buildingNumber} readOnly tabIndex={-1} className="bg-muted" placeholder="—" />
             {errors.buildingNumber && <p className="text-xs text-red-500">{errors.buildingNumber}</p>}
+            <p className="text-xs text-muted-foreground">Auto-filled from the selected unit.</p>
           </div>
           <div className="space-y-2">
             <Label htmlFor="road">Road (auto)</Label>
