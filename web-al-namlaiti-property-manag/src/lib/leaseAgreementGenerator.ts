@@ -204,7 +204,7 @@ function formatLeasePeriod(startIso: string, endIso: string): string {
   const monthText = remainingMonths === 0 ? "" : remainingMonths === 1 ? "1 Month" : `${remainingMonths} Months`;
 
   if (yearText && monthText) return `${yearText} ${monthText}`;
-  return yearText || monthText || "1 Month";
+  return yearText || monthText || "1 Year";
 }
 
 /**
@@ -306,7 +306,7 @@ export async function generateLeaseAgreementPdf(
     rent_amount: formatAgreementRent(lease.monthlyRent),
     // CPR and phone are rendered with fixed prefixes on the agreement.
     cpr_number: lease.cprNumber ? `CPR: ${lease.cprNumber}` : "",
-    phone_number: lease.phoneNumber ? `Phone number: ${lease.phoneNumber}` : "",
+    phone_number: lease.phoneNumber ? `Ph#: ${lease.phoneNumber}` : "",
   };
 
   for (const key of ALL_FIELD_KEYS) {
