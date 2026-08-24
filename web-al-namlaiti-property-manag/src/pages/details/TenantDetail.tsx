@@ -45,7 +45,7 @@ export default function TenantDetail() {
         </div>
         <div>
           <h1 className="text-2xl font-bold text-foreground">{tenant.name}</h1>
-          <p className="text-sm text-muted-foreground">{tenant.type} · {tenant.crNumber || "No CR"}</p>
+          <p className="text-sm text-muted-foreground">{tenant.type} · {tenant.crNumber ? `CPR: ${tenant.crNumber}` : "No CPR"}</p>
         </div>
         <StatusBadge status={tenant.status} />
       </div>

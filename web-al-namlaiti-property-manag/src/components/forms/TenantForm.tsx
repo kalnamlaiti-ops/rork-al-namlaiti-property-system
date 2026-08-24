@@ -117,8 +117,8 @@ export default function TenantForm({ initialData, onClose }: TenantFormProps) {
             </select>
           </div>
           <div className="space-y-2">
-            <Label htmlFor="idNumber">ID Number</Label>
-            <Input id="idNumber" value={form.idNumber} onChange={(e) => update("idNumber", e.target.value)} />
+            <Label htmlFor="idNumber">CPR Number</Label>
+            <Input id="idNumber" value={form.idNumber} onChange={(e) => update("idNumber", e.target.value)} placeholder="e.g. 09090304" />
           </div>
           <div className="space-y-2">
             <Label htmlFor="idExpiry">ID Expiry</Label>
