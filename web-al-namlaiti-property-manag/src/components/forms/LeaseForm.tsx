@@ -27,6 +27,14 @@ const BUILDING_OPTIONS = ["1440", "1434", "1337"] as const;
 const FIXED_BLOCK = "323";
 const FIXED_LOCATION = "Manama";
 
+/** Default lease period is 1 year. */
+function addOneYear(dateStr: string): string {
+  const d = new Date(dateStr);
+  if (Number.isNaN(d.getTime())) return dateStr;
+  d.setFullYear(d.getFullYear() + 1);
+  return d.toISOString().split("T")[0];
+}
+
 export default function LeaseForm({ initialData, onClose }: LeaseFormProps) {
   const { addLease, updateLease, tenants, units, leases } = useData();
   const isEdit = Boolean(initialData);
@@ -38,7 +46,7 @@ export default function LeaseForm({ initialData, onClose }: LeaseFormProps) {
     buildingNumber: initialData?.buildingNumber ?? "",
     road: initialData?.road ?? "",
     startDate: initialData?.startDate ?? new Date().toISOString().split("T")[0],
-    endDate: initialData?.endDate ?? new Date().toISOString().split("T")[0],
+    endDate: initialData?.endDate ?? addOneYear(new Date().toISOString().split("T")[0]),
     monthlyRent: initialData?.monthlyRent ?? 0,
     securityDeposit: initialData?.securityDeposit ?? 0,
     cprNumber: initialData?.cprNumber ?? "",
@@ -67,6 +75,12 @@ export default function LeaseForm({ initialData, onClose }: LeaseFormProps) {
     if (errors.buildingNumber) {
       setErrors((prev) => ({ ...prev, buildingNumber: "" }));
     }
+  };
+
+  /** Changing the start date keeps the lease period at 1 year by default. */
+  const updateStartDate = (value: string) => {
+    setForm((prev) => ({ ...prev, startDate: value, endDate: addOneYear(value) }));
+    setErrors((prev) => ({ ...prev, startDate: "", endDate: "" }));
   };
 
   const validate = () => {
@@ -208,8 +222,9 @@ export default function LeaseForm({ initialData, onClose }: LeaseFormProps) {
           </div>
           <div className="space-y-2">
             <Label htmlFor="startDate">Start Date *</Label>
-            <Input id="startDate" type="date" value={form.startDate} onChange={(e) => update("startDate", e.target.value)} />
+            <Input id="startDate" type="date" value={form.startDate} onChange={(e) => updateStartDate(e.target.value)} />
             {errors.startDate && <p className="text-xs text-red-500">{errors.startDate}</p>}
+            <p className="text-xs text-muted-foreground">End date auto-set to 1 year.</p>
           </div>
           <div className="space-y-2">
             <Label htmlFor="endDate">End Date *</Label>

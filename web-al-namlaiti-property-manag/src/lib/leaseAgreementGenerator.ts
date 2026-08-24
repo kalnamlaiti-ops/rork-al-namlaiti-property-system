@@ -60,8 +60,8 @@ export const DEFAULT_FIELD_CONFIGS: Record<LeaseTemplateFieldKey, Omit<LeaseTemp
   start_date: { x: 71, y: 268, width: 140, height: 16, fontSize: 10, fontFamily: "times", textAlign: "left" },
   end_date: { x: 229, y: 268, width: 140, height: 16, fontSize: 10, fontFamily: "times", textAlign: "left" },
   rent_amount: { x: 108, y: 287, width: 380, height: 16, fontSize: 9, fontFamily: "times", textAlign: "left" },
-  cpr_number: { x: 68, y: 305, width: 180, height: 16, fontSize: 10, fontFamily: "times", textAlign: "left" },
-  phone_number: { x: 300, y: 305, width: 180, height: 16, fontSize: 10, fontFamily: "times", textAlign: "left" },
+  cpr_number: { x: 68, y: 305, width: 260, height: 16, fontSize: 10, fontFamily: "times", textAlign: "left" },
+  phone_number: { x: 340, y: 305, width: 230, height: 16, fontSize: 10, fontFamily: "times", textAlign: "left" },
 };
 
 export const ALL_FIELD_KEYS: LeaseTemplateFieldKey[] = [
@@ -304,8 +304,9 @@ export async function generateLeaseAgreementPdf(
     start_date: formatAgreementDate(lease.startDate),
     end_date: formatAgreementDate(lease.endDate),
     rent_amount: formatAgreementRent(lease.monthlyRent),
-    cpr_number: lease.cprNumber ?? "",
-    phone_number: lease.phoneNumber ?? "",
+    // CPR and phone are rendered with fixed prefixes on the agreement.
+    cpr_number: lease.cprNumber ? `CPR: ${lease.cprNumber}` : "",
+    phone_number: lease.phoneNumber ? `Phone number: ${lease.phoneNumber}` : "",
   };
 
   for (const key of ALL_FIELD_KEYS) {
