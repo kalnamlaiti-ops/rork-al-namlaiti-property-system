@@ -38,6 +38,7 @@ function addOneYear(dateStr: string): string {
 export default function LeaseForm({ initialData, onClose }: LeaseFormProps) {
   const { addLease, updateLease, tenants, units, leases } = useData();
   const isEdit = Boolean(initialData);
+  const initialTenant = tenants.find((t) => t.id === initialData?.tenantId);
 
   const [form, setForm] = useState({
     tenantId: initialData?.tenantId ?? "",
@@ -49,8 +50,9 @@ export default function LeaseForm({ initialData, onClose }: LeaseFormProps) {
     endDate: initialData?.endDate ?? addOneYear(new Date().toISOString().split("T")[0]),
     monthlyRent: initialData?.monthlyRent ?? 0,
     securityDeposit: initialData?.securityDeposit ?? 0,
-    cprNumber: initialData?.cprNumber ?? "",
-    phoneNumber: initialData?.phoneNumber ?? "",
+    // CPR and phone are always derived from the selected tenant record.
+    cprNumber: initialTenant?.crNumber ?? initialData?.cprNumber ?? "",
+    phoneNumber: initialTenant?.phone ?? initialData?.phoneNumber ?? "",
     status: initialData?.status ?? "Active",
     paymentFrequency: initialData?.paymentFrequency ?? "Monthly",
     notes: initialData?.notes ?? "",
@@ -74,6 +76,20 @@ export default function LeaseForm({ initialData, onClose }: LeaseFormProps) {
     }));
     if (errors.buildingNumber) {
       setErrors((prev) => ({ ...prev, buildingNumber: "" }));
+    }
+  };
+
+  /** Selecting a tenant pulls CPR and phone from the tenant record (single source of truth). */
+  const selectTenant = (tenantId: string) => {
+    const tenant = tenants.find((t) => t.id === tenantId);
+    setForm((prev) => ({
+      ...prev,
+      tenantId,
+      cprNumber: tenant?.crNumber ?? "",
+      phoneNumber: tenant?.phone ?? "",
+    }));
+    if (errors.tenantId) {
+      setErrors((prev) => ({ ...prev, tenantId: "" }));
     }
   };
 
@@ -106,8 +122,13 @@ export default function LeaseForm({ initialData, onClose }: LeaseFormProps) {
     const end = new Date(form.endDate).getTime();
     const contractDays = Math.max(1, Math.ceil((end - start) / (1000 * 60 * 60 * 24)));
 
+    const selectedTenant = tenants.find((t) => t.id === form.tenantId);
+
     const payload = {
       ...form,
+      // Always derive from the selected tenant record to keep the tenant as the single source of truth.
+      cprNumber: selectedTenant?.crNumber ?? form.cprNumber,
+      phoneNumber: selectedTenant?.phone ?? form.phoneNumber,
       road: BUILDING_ROAD_MAP[form.buildingNumber] ?? form.road,
       block: FIXED_BLOCK,
       location: FIXED_LOCATION,
@@ -134,7 +155,7 @@ export default function LeaseForm({ initialData, onClose }: LeaseFormProps) {
             <select
               id="tenantId"
               value={form.tenantId}
-              onChange={(e) => update("tenantId", e.target.value)}
+              onChange={(e) => selectTenant(e.target.value)}
               className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm"
             >
               <option value="">Select tenant</option>
@@ -197,13 +218,15 @@ export default function LeaseForm({ initialData, onClose }: LeaseFormProps) {
           </div>
           <div className="space-y-2">
             <Label htmlFor="cprNumber">CPR Number *</Label>
-            <Input id="cprNumber" value={form.cprNumber} onChange={(e) => update("cprNumber", e.target.value)} placeholder="e.g. 91234567" />
+            <Input id="cprNumber" value={form.cprNumber} readOnly tabIndex={-1} className="bg-muted" />
             {errors.cprNumber && <p className="text-xs text-red-500">{errors.cprNumber}</p>}
+            <p className="text-xs text-muted-foreground">Auto-filled from the selected tenant record.</p>
           </div>
           <div className="space-y-2">
             <Label htmlFor="phoneNumber">Phone Number *</Label>
-            <Input id="phoneNumber" value={form.phoneNumber} onChange={(e) => update("phoneNumber", e.target.value)} placeholder="e.g. +973 3605 1133" />
+            <Input id="phoneNumber" value={form.phoneNumber} readOnly tabIndex={-1} className="bg-muted" />
             {errors.phoneNumber && <p className="text-xs text-red-500">{errors.phoneNumber}</p>}
+            <p className="text-xs text-muted-foreground">Auto-filled from the selected tenant record.</p>
           </div>
           <div className="space-y-2">
             <Label htmlFor="status">Status</Label>
